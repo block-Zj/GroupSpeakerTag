@@ -45,7 +45,7 @@ from langbot_plugin.api.entities import context, events
 from langbot_plugin.api.entities.builtin.platform import message as platform_message
 from langbot_plugin.api.entities.builtin.provider.message import ContentElement, Message
 
-PLUGIN_VERSION = '0.4.0'
+PLUGIN_VERSION = '0.4.1'
 
 DEFAULT_TAG_FORMAT = '【{name}（QQ:{id}）】'
 
@@ -67,6 +67,10 @@ HISTORY_PREVIEW_COUNT = 8
 # 图片本地下载
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 IMAGE_TIMEOUT_SECONDS = 10.0
+
+# 历史消息消毒：无法直接送给模型的图片/文件元素降级成这些占位文本
+PLACEHOLDER_IMAGE = '[图片]'
+PLACEHOLDER_FILE = '[文件]'
 
 DIAGNOSTIC_COMMANDS = ('whoami', 'speaker', 'prompt')
 
@@ -125,6 +129,8 @@ _STATE: dict[str, typing.Any] = {
     'images_ok': 0,
     'images_failed': 0,
     'last_image_error': '',
+    'sanitized_total': 0,
+    'last_sanitize': '',
 }
 
 
@@ -147,6 +153,98 @@ def _note_image_ok() -> None:
 def _note_image_error(detail: str) -> None:
     _STATE['images_failed'] = int(_STATE.get('images_failed') or 0) + 1
     _STATE['last_image_error'] = detail
+
+
+def _note_sanitize(count: int, detail: str) -> None:
+    _STATE['sanitized_total'] = int(_STATE.get('sanitized_total') or 0) + count
+    _STATE['last_sanitize'] = detail
+
+
+def _get_field(obj: typing.Any, name: str) -> typing.Any:
+    """兼容 dict 与 pydantic 模型两种取字段方式。"""
+
+    if isinstance(obj, dict):
+        return obj.get(name)
+    return getattr(obj, name, None)
+
+
+def _sanitize_content_list(content: typing.Any) -> tuple[typing.Any, int, str]:
+    """把无法直接送给模型的图片/文件元素降级成文本占位。
+
+    返回 (新内容, 替换数量, 最近一次替换原因)。
+
+    为什么需要这一步（LangBot 4.11 的连锁反应）：
+    1. 历史记录里的 `image_url` 指向 QQ CDN 的一次性签名链接，服务商下载必然失败 → 400；
+    2. transcript 落库时会把 `image_base64` 抹成 null，重放出来就是"空图片元素"。
+    两者都会污染**整段历史**，一条坏记录能让该会话永远报错，所以必须在请求前清一遍。
+    """
+
+    if not isinstance(content, list):
+        return content, 0, ''
+
+    out: list[typing.Any] = []
+    replaced = 0
+    reason = ''
+
+    for element in content:
+        etype = str(_get_field(element, 'type') or '')
+
+        if etype == 'image_url':
+            raw = _get_field(element, 'image_url')
+            url = str(_get_field(raw, 'url') or '') if raw is not None else ''
+            if url.startswith('data:'):
+                out.append(element)
+            else:
+                out.append(ContentElement.from_text(PLACEHOLDER_IMAGE))
+                replaced += 1
+                reason = '历史里的远程图片链接（服务商抓不到）'
+
+        elif etype == 'image_base64':
+            if _get_field(element, 'image_base64'):
+                out.append(element)
+            else:
+                out.append(ContentElement.from_text(PLACEHOLDER_IMAGE))
+                replaced += 1
+                reason = '历史图片载荷为空（落库时 base64 被抹掉）'
+
+        elif etype in ('file_url', 'file_base64'):
+            out.append(ContentElement.from_text(PLACEHOLDER_FILE))
+            replaced += 1
+            reason = '文件元素（OpenAI 兼容接口不支持）'
+
+        else:
+            out.append(element)
+
+    return out, replaced, reason
+
+
+def _sanitize_prompt_images(messages: typing.Any) -> tuple[int, str]:
+    """就地清理一组消息里的危险/空图片元素，返回 (替换总数, 原因)。"""
+
+    total = 0
+    reason = ''
+
+    for message in messages or []:
+        content = _get_field(message, 'content')
+        if isinstance(content, str) or content is None:
+            continue
+
+        new_content, count, why = _sanitize_content_list(content)
+        if not count:
+            continue
+
+        total += count
+        reason = why or reason
+
+        if isinstance(message, dict):
+            message['content'] = new_content
+        else:
+            try:
+                message.content = new_content
+            except Exception:
+                pass
+
+    return total, reason
 
 
 def _as_bool(value: typing.Any, default: bool = True) -> bool:
@@ -594,6 +692,17 @@ class GroupSpeakerTagEventListener(EventListener):
                                 break
                         if not already:
                             default_prompt.append(Message(role='system', content=GUIDE_TEXT))
+
+                # 先消毒，再生成快照 —— 快照里看到的才是真正送给模型的内容
+                cleaned = 0
+                clean_reason = ''
+                for attr in ('default_prompt', 'prompt'):
+                    count, why = _sanitize_prompt_images(getattr(event, attr, None))
+                    if count:
+                        cleaned += count
+                        clean_reason = why or clean_reason
+                if cleaned:
+                    _note_sanitize(cleaned, clean_reason)
 
                 dump = _build_prompt_dump(
                     getattr(event, 'default_prompt', None),

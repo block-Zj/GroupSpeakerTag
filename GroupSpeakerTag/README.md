@@ -8,7 +8,7 @@
 
 适用：LangBot 4.10.x / 4.11.x（`uvx langbot` 或 Docker）+ NapCat（OneBot v11）接 QQ。
 
-当前版本：**0.4.0**
+当前版本：**0.4.1**
 
 ---
 
@@ -156,12 +156,96 @@ if isinstance(component, platform_message.Face):
 
 ---
 
+## 二·六、v0.4.1：历史图片消毒（重要）
+
+### 症状
+
+某个群**每条消息**都回 `Agent runner temporarily unavailable. Please try again.`，
+日志里是：
+
+```
+.messages[31].image[0]: Failed to download image from https://multimedia.nt.qq.com.cn/...
+```
+
+而换个群、或清空历史之后又一切正常。**`messages[N]` 的 N 每次都不一样**——
+这是最关键的线索：坏的不是新消息，是历史里某条记录随着窗口滑动在换位置。
+
+### 根因：LangBot 4.11 会让"图片进入历史"这一步产生两种毒记录
+
+**① 旧的远程链接（历史遗留）**
+
+QQ 图片链接是 `multimedia.nt.qq.com.cn/...&rkey=...`，一次性签名 + 来源校验。
+历史里只要存了 `{"type": "image_url", "image_url": {"url": "https://multimedia..."}}`，
+之后**每一轮请求**都会把它原样发给模型；服务商服务器下载必然失败 → 400 → 整轮失败。
+
+**② 空图片元素（4.11 的落库策略导致）**
+
+`pkg/agent/runner/run_journal.py:42-53` 在写 transcript 时会把 base64 抹掉：
+
+```python
+if item_type == 'image_base64' and item.get('image_base64'):
+    item['image_base64'] = None
+    item['content_redacted'] = True
+```
+
+于是历史里躺着一堆 `{"type": "image_base64", "image_base64": null}`。
+请求层（`litellmchat.py:715-745`）会 `continue` 掉它们，不报错但**图片信息彻底丢失**。
+
+两者叠加的结果：**只要某个会话发过图，那段历史就变成不可靠状态**——
+一条坏记录能让该会话永久失败，而且只影响发言最活跃的那个群。
+
+### 0.4.1 的做法
+
+在 `PromptPreProcessing` 里，请求发出前把整段上下文过一遍（此时 `event.prompt` 可改写，
+宿主在 `preproc.py:429` 会用 `query.messages = event_ctx.event.prompt` 接收修改）：
+
+| 元素 | 处理 |
+|---|---|
+| `image_url` 且是 `http(s)` 链接 | 换成 `[图片]` |
+| `image_url` 且是 `data:` URI | **原样保留**（合法，不用清洗） |
+| `image_base64` 有载荷 | 原样保留 |
+| `image_base64` 为空 | 换成 `[图片]` |
+| `file_url` / `file_base64` | 换成 `[文件]` |
+
+这样即使数据库里还留着坏记录，也**不可能再让请求 400**。
+`!whoami` 里会显示累计清洗数量和最近一次原因。
+
+> 换了这版之后，历史里有没有毒记录都不影响使用；
+> 但先把数据库清一遍更干净（见下面「清理历史」）。
+
+### 清理历史（可选，建议做）
+
+判据一：还有没有远程图片链接
+
+```sql
+select count(*) from transcript where content_json like '%"image_url": {"url"%';
+```
+
+判据二：还有没有空图片元素
+
+```sql
+select count(*) from transcript where content_json like '%content_redacted%';
+```
+
+两条都应为 `0`。不为 0 时，把 `image_url` / 空 `image_base64` 元素就地换成
+`{"type": "text", "text": "[图片]"}` 即可，**行数、角色、文字内容都不要动**。
+动手前先备份（LangBot 运行中也能安全备份）：
+
+```python
+import sqlite3
+src = sqlite3.connect(r"D:\Desktop\Ling\langbot\data\langbot.db")
+dst = sqlite3.connect(r"D:\Desktop\Ling\langbot\data\langbot.db.bak_" + ts)
+src.backup(dst)
+```
+
+---
+
 ## 三、安装
 
 ### 方式 A（推荐）：网页上传 .lbpkg
 
 1. 面板 `http://127.0.0.1:5300` → **添加扩展**（Add Extension）。
-2. 上传 `GroupSpeakerTag-0.4.0.lbpkg`。
+2. 上传 `GroupSpeakerTag-0.4.1.lbpkg`。
    - 如果你还装着 0.2.x / 0.3.x，**先卸载旧版再装**（手传的包没有"升级"按钮），
      否则可能出现两个版本并存。
 3. 面板 → **插件**，确认已启用。
@@ -212,7 +296,7 @@ if isinstance(component, platform_message.Face):
 `!whoami` 输出示例：
 
 ```
-【发言人标记 · 自检 v0.4.0】
+【发言人标记 · 自检 v0.4.1】
 会话：group_123456　← 同群所有人共用这一份上下文
 群名：XX交流群
 本次发言人：张三　ID：10001

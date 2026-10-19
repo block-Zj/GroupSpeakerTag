@@ -42,6 +42,7 @@ from langbot_plugin.api.definition.components.common.event_listener import Event
 from langbot_plugin.api.definition.plugin import BasePlugin
 from langbot_plugin.api.entities import events
 from langbot_plugin.api.entities.builtin.platform import message as platform_message
+from langbot_plugin.api.entities.builtin.provider.message import ContentElement, Message
 
 print("[1] 模块导入成功")
 print(f"    BaseComponent.get_plugin_config 存在? {hasattr(BaseComponent, 'get_plugin_config')}")
@@ -185,6 +186,37 @@ async def main():
     st._note_tag(tag, "张三(10001)")
     assert st._STATE["tag_count"] == 1
     print(f"[10] 标记渲染通过: {tag}")
+
+    # ------------------------------------------------------------ 历史图片消毒
+    history = [
+        Message(role="user", content=[
+            ContentElement.from_text("【张三（QQ:10001）】"),
+            ContentElement.from_image_url("https://multimedia.nt.qq.com.cn/download?appid=1407&rkey=x"),
+        ]),
+        Message(role="user", content=[
+            ContentElement.from_text("【李四（QQ:10002）】"),
+            ContentElement(type="image_base64", image_base64=None, content_redacted=True),
+        ]),
+        Message(role="user", content=[ContentElement.from_text("这条是纯文字，不该被动")]),
+    ]
+    st._STATE.update({"sanitized_total": 0, "last_sanitize": ""})
+    cleaned, why = st._sanitize_prompt_images(history)
+    assert cleaned == 2, f"应清洗 2 处，实际 {cleaned}"
+    assert history[0].content[1].type == "text" and history[0].content[1].text == "[图片]"
+    assert history[1].content[1].type == "text" and history[1].content[1].text == "[图片]"
+    assert history[2].content[0].text == "这条是纯文字，不该被动"
+    for msg in history:
+        for element in msg.content:
+            assert element.type != "image_url", "消毒后绝不能残留 image_url"
+            if element.type == "image_base64":
+                raise AssertionError("消毒后不该有空的 image_base64")
+    # data URI 是合法的，必须原样保留
+    keep = [Message(role="user", content=[
+        ContentElement.from_image_base64("data:image/png;base64,iVBORw0KGgo="),
+    ])]
+    kept, _ = st._sanitize_prompt_images(keep)
+    assert kept == 0 and keep[0].content[0].type == "image_base64", "data URI 不该被清洗"
+    print(f"[11] 历史图片消毒通过: {cleaned} 处 → [图片]（{why}），data URI 原样保留")
 
 
 asyncio.run(main())
