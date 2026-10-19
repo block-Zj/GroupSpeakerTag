@@ -1,0 +1,75 @@
+apiVersion: v1
+kind: Plugin
+metadata:
+  author: Gareth
+  name: GroupSpeakerTag
+  repository: https://github.com/ThDWARF/GroupSpeakerTag
+  version: 0.4.0
+  description:
+    en_US: Prefix group messages with the speaker's name and ID, fetch QQ images locally into base64, and turn QQ faces (emoji) into readable text.
+    zh_Hans: 给群消息加上「发言人昵称(ID)」前缀；QQ 图片在本地转 base64；QQ 表情转成可读文本。
+  label:
+    en_US: Group Speaker Tag
+    zh_Hans: 群发言人标记
+  icon: assets/icon.svg
+spec:
+  config:
+    - name: tag-format
+      label:
+        en_US: Tag Format
+        zh_Hans: 标记格式
+      description:
+        en_US: "Placeholders: {name} = sender display name, {id} = sender platform ID. Examples: [群成员 {name}(ID:{id})] or [{name}]"
+        zh_Hans: "可用占位符：{name} = 发言人昵称/群名片，{id} = 发言人平台 ID（QQ 号）。示例：【{name}（QQ:{id}）】 或 【{name}】"
+      type: string
+      default: "【{name}（QQ:{id}）】"
+      required: false
+    - name: image-mode
+      label:
+        en_US: Image Handling
+        zh_Hans: 图片处理
+      description:
+        en_US: "auto = download the image locally and convert to base64 (needed for QQ images); skip = replace with [图片] text, for text-only models."
+        zh_Hans: "auto = 在本地下载图片并转成 base64（QQ 图片必须这样做，否则模型看不到）；skip = 用「[图片]」文本占位，适合纯文本模型。"
+      type: string
+      default: "auto"
+      required: false
+    - name: inject-guide
+      label:
+        en_US: Inject Identity Guide
+        zh_Hans: 注入身份说明
+      description:
+        en_US: Append one system message explaining the tag so the model does not treat it as user text.
+        zh_Hans: 追加一条系统说明，告诉模型该标记的含义，避免它把标记当成用户正文或复述出来。
+      type: boolean
+      default: true
+      required: false
+    - name: tag-quote
+      label:
+        en_US: Include Quoted Message
+        zh_Hans: 附带引用内容
+      description:
+        en_US: Keep the quoted ("reply to") text in the quoted form when a member replies to someone.
+        zh_Hans: 当成员使用「回复」功能时，把被引用的原文一并带上并标注来源。
+      type: boolean
+      default: true
+      required: false
+    - name: prompt-dump-scope
+      label:
+        en_US: "!prompt Access Scope"
+        zh_Hans: "!prompt 使用范围"
+      description:
+        en_US: "Who may run !prompt. Values: admin (default, bot admins and private chat) / everyone (anyone in the group) / off (disable)."
+        zh_Hans: "谁可以用 !prompt 查看提示词快照。取值：admin（默认，机器人管理员 + 私聊）/ everyone（群内任何人）/ off（关闭）。注意 everyone 会把系统提示词暴露给群成员。"
+      type: string
+      default: "admin"
+      required: false
+  components:
+    EventListener:
+      fromDirs:
+        - path: components/event_listener/
+          maxDepth: 1
+execution:
+  python:
+    path: main.py
+    attr: GroupSpeakerTagPlugin

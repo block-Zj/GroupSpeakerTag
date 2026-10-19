@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: EventListener
+metadata:
+  name: speaker_tag
+  label:
+    en_US: Group Speaker Tag Listener
+    zh_Hans: 群发言人标记
+spec:
+execution:
+  python:
+    path: speaker_tag.py
+    attr: GroupSpeakerTagEventListener
