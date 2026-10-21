@@ -18,7 +18,7 @@ LangBot（v4）插件：让 QQ 群里的 AI 认得出**谁在说话**、看得�
 
 ## 安装
 
-1. 下载 `GroupSpeakerTag-0.4.1.lbpkg`
+1. 下载 `GroupSpeakerTag-0.4.2.lbpkg`
 2. 面板 → 添加扩展 → 上传该文件（若装着旧版，先卸载再装；手传包没有"升级"按钮）
 3. 面板 → 流水线 → 插件/扩展设置，**把插件绑定到这条流水线**（漏了等于没装）
 4. 群里 `@机器人 !whoami` 验证
@@ -30,14 +30,14 @@ LangBot（v4）插件：让 QQ 群里的 AI 认得出**谁在说话**、看得�
 ```
 GroupSpeakerTag/                            插件源码（manifest.yaml 在根）
   components/event_listener/speaker_tag.py  全部逻辑
-GroupSpeakerTag-0.4.1.lbpkg                 发布包，可直接上传安装
+GroupSpeakerTag-0.4.2.lbpkg                 发布包，可直接上传安装
 GroupSpeakerTag-离线自检.py                  10 项断言的离线验证脚本
 QQ机器人_DeepSeek_保姆级部署指南.md           本机部署记录
 ```
 
 ## 版本
 
-当前 **v0.4.1**（tag `v0.4.1`）。
+当前 **v0.4.2**（tag `v0.4.2`）。
 
 | 版本 | 主要变更 |
 |---|---|
@@ -46,6 +46,7 @@ QQ机器人_DeepSeek_保姆级部署指南.md           本机部署记录
 | 0.3.0 | 图片改本地转 base64，移除 `from_image_url` |
 | 0.4.0 | QQ 表情 / 骰子 / 猜拳 / 表情包文本化 |
 | 0.4.1 | 请求前清洗历史图片（远程链接 / 空 base64 → `[图片]`），一条坏记录不再拖垮整个会话 |
+| 0.4.2 | 自检报告区分“配置为空”与“读取失败”，并显示历史图片消毒计数 |
 
 ## 兼容性
 

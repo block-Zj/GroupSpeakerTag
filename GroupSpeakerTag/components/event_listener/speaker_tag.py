@@ -45,7 +45,7 @@ from langbot_plugin.api.entities import context, events
 from langbot_plugin.api.entities.builtin.platform import message as platform_message
 from langbot_plugin.api.entities.builtin.provider.message import ContentElement, Message
 
-PLUGIN_VERSION = '0.4.1'
+PLUGIN_VERSION = '0.4.2'
 
 DEFAULT_TAG_FORMAT = '【{name}（QQ:{id}）】'
 
@@ -86,22 +86,32 @@ IMAGE_BROWSER_UA = (
 # 配置与运行时状态
 # --------------------------------------------------------------------------
 
+# 配置读取的实际情况：loaded=True 表示某条路径返回了 dict（哪怕是空 dict）
+_CONFIG_STATE: dict[str, typing.Any] = {'loaded': False, 'source': '', 'error': ''}
+
 
 def _plugin_config(component: typing.Any) -> dict[str, typing.Any]:
     """读取插件配置，兼容不同版本的 langbot-plugin SDK。
 
     - langbot-plugin >= 0.7（langbot 4.11+）：组件上有 get_plugin_config()
     - langbot-plugin 0.5.x（langbot 4.10.x 锁定）：组件上没有，走 plugin.get_config()
+
+    读取结果会记进 _CONFIG_STATE，好让 !whoami 分得清
+    「读到了但配置为空」和「彻底没读到」——这两件事以前被混成一句"未取到"。
     """
+
+    _CONFIG_STATE['loaded'] = False
+    _CONFIG_STATE['source'] = ''
 
     getter = getattr(component, 'get_plugin_config', None)
     if callable(getter):
         try:
             value = getter()
             if isinstance(value, dict):
+                _CONFIG_STATE.update(loaded=True, source='component.get_plugin_config()', error='')
                 return dict(value)
-        except Exception:
-            pass
+        except Exception as exc:
+            _CONFIG_STATE['error'] = f'get_plugin_config: {type(exc).__name__}: {exc}'
 
     plugin = getattr(component, 'plugin', None)
     if plugin is not None:
@@ -110,11 +120,13 @@ def _plugin_config(component: typing.Any) -> dict[str, typing.Any]:
             try:
                 value = getter()
                 if isinstance(value, dict):
+                    _CONFIG_STATE.update(loaded=True, source='plugin.get_config()', error='')
                     return dict(value)
-            except Exception:
-                pass
+            except Exception as exc:
+                _CONFIG_STATE['error'] = f'plugin.get_config: {type(exc).__name__}: {exc}'
         value = getattr(plugin, 'config', None)
         if isinstance(value, dict):
+            _CONFIG_STATE.update(loaded=True, source='plugin.config', error='')
             return dict(value)
 
     return {}
@@ -543,11 +555,23 @@ async def _build_identity_report(event_context: context.EventContext, config: di
     lines.append(f'标签模板：{template}')
     lines.append(f'身份说明注入：{"开" if _as_bool(config.get("inject-guide"), True) else "关"}')
     lines.append(f'图片处理：{_image_mode(config.get("image-mode"))}')
-    lines.append(f'配置读取：{"成功" if config else "未取到，正在用默认值"}')
+    if _CONFIG_STATE.get('loaded'):
+        source = str(_CONFIG_STATE.get('source') or '')
+        suffix = '' if config else '；当前配置为空，全部按默认值运行'
+        lines.append(f'配置读取：正常（{source}）{suffix}')
+    else:
+        reason = str(_CONFIG_STATE.get('error') or '')
+        lines.append(f'配置读取：未取到，全部按默认值运行{f"（{reason}）" if reason else ""}')
     lines.append(f'已打标消息数：{_STATE.get("tag_count", 0)}')
     if _STATE.get('last_tag'):
         lines.append(f'最近一次实际加的前缀：{_STATE["last_tag"]}（{_STATE.get("last_sender", "")}）')
     lines.append(f'图片：成功 {_STATE.get("images_ok", 0)} 张 / 失败 {_STATE.get("images_failed", 0)} 张')
+    sanitized = int(_STATE.get('sanitized_total') or 0)
+    if sanitized:
+        detail = str(_STATE.get('last_sanitize') or '')
+        lines.append(f'历史图片消毒：累计 {sanitized} 处 → [图片]{f"（最近：{detail}）" if detail else ""}')
+    else:
+        lines.append('历史图片消毒：累计 0 处（历史里没有坏图片元素）')
     if _STATE.get('last_image_error'):
         lines.append(f'⚠ 最近一次图片失败：{_STATE["last_image_error"]}')
     if _STATE.get('last_error'):

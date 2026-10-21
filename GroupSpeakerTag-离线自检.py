@@ -73,7 +73,12 @@ cfg = {"tag-format": "【{name}】", "image-mode": "auto"}
 assert st._plugin_config(OldStyle(cfg)) == cfg, "旧 SDK 路径失败"
 assert st._plugin_config(NewStyle(cfg)) == cfg, "新 SDK 路径失败"
 assert st._plugin_config(Broken()) == {}, "兜底路径失败"
-print("[2] 配置读取三路径通过")
+assert st._CONFIG_STATE.get("loaded") is False, "无配置源时应记为未取到"
+# 空配置也是"读取成功"，不能报成"未取到"（v0.4.2 修的就是这个误报）
+assert st._plugin_config(NewStyle({})) == {}
+assert st._CONFIG_STATE.get("loaded") is True, "空配置应记为读取成功"
+assert "get_plugin_config" in str(st._CONFIG_STATE.get("source")), st._CONFIG_STATE.get("source")
+print("[2] 配置读取三路径通过（空配置也识别为读取成功）")
 
 
 # ---------------------------------------------------------------- 本地图床
