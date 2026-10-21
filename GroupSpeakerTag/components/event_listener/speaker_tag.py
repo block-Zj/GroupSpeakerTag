@@ -45,7 +45,7 @@ from langbot_plugin.api.entities import context, events
 from langbot_plugin.api.entities.builtin.platform import message as platform_message
 from langbot_plugin.api.entities.builtin.provider.message import ContentElement, Message
 
-PLUGIN_VERSION = '0.4.2'
+PLUGIN_VERSION = '0.4.3'
 
 DEFAULT_TAG_FORMAT = '【{name}（QQ:{id}）】'
 
@@ -71,6 +71,7 @@ IMAGE_TIMEOUT_SECONDS = 10.0
 # 历史消息消毒：无法直接送给模型的图片/文件元素降级成这些占位文本
 PLACEHOLDER_IMAGE = '[图片]'
 PLACEHOLDER_FILE = '[文件]'
+PLACEHOLDER_BLANK = '[空白消息]'
 
 DIAGNOSTIC_COMMANDS = ('whoami', 'speaker', 'prompt')
 
@@ -143,6 +144,7 @@ _STATE: dict[str, typing.Any] = {
     'last_image_error': '',
     'sanitized_total': 0,
     'last_sanitize': '',
+    'blank_fixed': 0,
 }
 
 
@@ -170,6 +172,10 @@ def _note_image_error(detail: str) -> None:
 def _note_sanitize(count: int, detail: str) -> None:
     _STATE['sanitized_total'] = int(_STATE.get('sanitized_total') or 0) + count
     _STATE['last_sanitize'] = detail
+
+
+def _note_blank(count: int) -> None:
+    _STATE['blank_fixed'] = int(_STATE.get('blank_fixed') or 0) + count
 
 
 def _get_field(obj: typing.Any, name: str) -> typing.Any:
@@ -257,6 +263,61 @@ def _sanitize_prompt_images(messages: typing.Any) -> tuple[int, str]:
                 pass
 
     return total, reason
+
+
+def _is_blank_message(content: typing.Any) -> bool:
+    """消息内容是否为空：空字符串 / 空列表 / 只有空白文本。"""
+
+    if content is None:
+        return True
+    if isinstance(content, str):
+        return not content.strip()
+    if isinstance(content, list):
+        if not content:
+            return True
+        for element in content:
+            etype = str(_get_field(element, 'type') or '')
+            if etype != 'text':
+                return False  # 有图片/文件等，不算空
+            if str(_get_field(element, 'text') or '').strip():
+                return False
+        # 走完循环说明所有元素都是空白文本
+        return True
+    return False
+
+
+def _sanitize_blank_messages(messages: typing.Any) -> int:
+    """把空消息补成占位文本。
+
+    为什么必须处理：DeepSeek（以及多数 OpenAI 兼容接口）收到
+    `{"role": "user", "content": []}` 或只有空白的 content 会直接返回
+    400，而 LangBot 4.11 会把这类消息原样留在 transcript 里反复重放
+    （例如纯图片消息在旧版本里没转换成文本时就会留下空消息）。
+    表现就是整个会话每条消息都 `Invalid request parameters`，直到这条
+    空消息随窗口滑出去才自愈。
+    """
+
+    fixed = 0
+
+    for message in messages or []:
+        content = _get_field(message, 'content')
+        if not _is_blank_message(content):
+            continue
+        # 已经是占位文本就别重复处理
+        if isinstance(content, str) and content.strip() == PLACEHOLDER_BLANK:
+            continue
+
+        placeholder = ContentElement.from_text(PLACEHOLDER_BLANK)
+        if isinstance(message, dict):
+            message['content'] = [placeholder]
+        else:
+            try:
+                message.content = [placeholder]
+            except Exception:
+                continue
+        fixed += 1
+
+    return fixed
 
 
 def _as_bool(value: typing.Any, default: bool = True) -> bool:
@@ -572,6 +633,9 @@ async def _build_identity_report(event_context: context.EventContext, config: di
         lines.append(f'历史图片消毒：累计 {sanitized} 处 → [图片]{f"（最近：{detail}）" if detail else ""}')
     else:
         lines.append('历史图片消毒：累计 0 处（历史里没有坏图片元素）')
+    blanks = int(_STATE.get('blank_fixed') or 0)
+    if blanks:
+        lines.append(f'空消息补齐：累计 {blanks} 处 → [空白消息]')
     if _STATE.get('last_image_error'):
         lines.append(f'⚠ 最近一次图片失败：{_STATE["last_image_error"]}')
     if _STATE.get('last_error'):
@@ -727,6 +791,12 @@ class GroupSpeakerTagEventListener(EventListener):
                         clean_reason = why or clean_reason
                 if cleaned:
                     _note_sanitize(cleaned, clean_reason)
+
+                blank = 0
+                for attr in ('default_prompt', 'prompt'):
+                    blank += _sanitize_blank_messages(getattr(event, attr, None))
+                if blank:
+                    _note_blank(blank)
 
                 dump = _build_prompt_dump(
                     getattr(event, 'default_prompt', None),

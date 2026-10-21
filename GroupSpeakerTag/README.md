@@ -8,7 +8,7 @@
 
 适用：LangBot 4.10.x / 4.11.x（`uvx langbot` 或 Docker）+ NapCat（OneBot v11）接 QQ。
 
-当前版本：**0.4.2**
+当前版本：**0.4.3**
 
 ---
 
@@ -250,6 +250,50 @@ src.backup(dst)
 `_plugin_config()` 现在把读取结果记进 `_CONFIG_STATE`（`loaded` / `source` / `error`），
 并且每次调用先重置，所以"空配置"和"读不到"是两种明确的结论，不再混为一谈。
 
+## 二·八、v0.4.3：空消息补齐（`Invalid request parameters` 的另一个源头）
+
+### 症状
+
+整个会话每条消息都失败，面板上只有：
+
+```
+Model request failed: Invalid request parameters
+```
+
+**跟发什么内容无关**，纯文字也失败；过几分钟又自己好了。
+
+### 根因
+
+transcript 里存在**内容为空的消息**：
+
+```json
+{"role": "user", "content": []}          // 纯图片消息在旧版本里没转换成功
+{"role": "user", "content": [{"type": "text", "text": " "}]}
+```
+
+LangBot 4.11 会把它们原样重放进请求。DeepSeek 收到空 content 直接返回 400，
+于是**一条空消息能让该会话连续失败**，直到它被上下文窗口挤出去才"自愈"——
+这就是"过一会儿又好了"的原因。
+
+### 0.4.3 的做法
+
+`PromptPreProcessing` 里在图片消毒之后再扫一遍消息：
+
+| 情况 | 处理 |
+|---|---|
+| `content == []` | 换成 `[空白消息]` |
+| `content` 是空字符串 / 纯空白 | 换成 `[空白消息]` |
+| 元素只有空白 `text` | 换成 `[空白消息]` |
+| 含图片/文件的元素 | **不动**（那是有效内容） |
+| 已经是 `[空白消息]` | 跳过（幂等） |
+
+`!whoami` 会多一行 `空消息补齐：累计 N 处 → [空白消息]`。
+
+> 顺带说明：LangBot 4.11 把 `litellm.BadRequestError` 统一映射成
+> `Invalid request parameters`（`litellmchat.py` 的映射表），**上游原文被丢弃**。
+> 想知道真实原因，用仓库根的 `patch-detailed-errors.py` 打一个补丁，
+> 之后日志里会带上 DeepSeek 返回的 `error.message`。
+
 ---
 
 ## 三、安装
@@ -257,7 +301,7 @@ src.backup(dst)
 ### 方式 A（推荐）：网页上传 .lbpkg
 
 1. 面板 `http://127.0.0.1:5300` → **添加扩展**（Add Extension）。
-2. 上传 `GroupSpeakerTag-0.4.2.lbpkg`。
+2. 上传 `GroupSpeakerTag-0.4.3.lbpkg`。
    - 如果你还装着 0.2.x / 0.3.x，**先卸载旧版再装**（手传的包没有"升级"按钮），
      否则可能出现两个版本并存。
 3. 面板 → **插件**，确认已启用。
@@ -308,7 +352,7 @@ src.backup(dst)
 `!whoami` 输出示例：
 
 ```
-【发言人标记 · 自检 v0.4.2】
+【发言人标记 · 自检 v0.4.3】
 会话：group_123456　← 同群所有人共用这一份上下文
 群名：XX交流群
 本次发言人：张三　ID：10001

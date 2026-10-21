@@ -223,6 +223,25 @@ async def main():
     assert kept == 0 and keep[0].content[0].type == "image_base64", "data URI 不该被清洗"
     print(f"[11] 历史图片消毒通过: {cleaned} 处 → [图片]（{why}），data URI 原样保留")
 
+    # ------------------------------------------------------------ 空消息补齐
+    blanks = [
+        Message(role="user", content=[]),
+        Message(role="user", content=""),
+        Message(role="user", content="   "),
+        Message(role="user", content=[ContentElement.from_text(" ") ]),
+        Message(role="assistant", content="保留我"),
+    ]
+    st._STATE.update({"blank_fixed": 0})
+    fixed = st._sanitize_blank_messages(blanks)
+    assert fixed == 4, f"应补齐 4 条，实际 {fixed}"
+    for msg in blanks[:4]:
+        assert msg.content[0].text == "[空白消息]", msg.content
+    assert blanks[4].content == "保留我", "正常消息不该被动"
+    # 已经补过的不要重复计数
+    again = st._sanitize_blank_messages([Message(role="user", content="[空白消息]")])
+    assert again == 0, "占位文本不应被再次处理"
+    print(f"[12] 空消息补齐通过: {fixed} 处 → [空白消息]，且幂等")
+
 
 asyncio.run(main())
 server.shutdown()
