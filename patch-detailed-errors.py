@@ -29,20 +29,34 @@ import os
 import py_compile
 import sys
 
-MARKER = '[detail-errors patch]'
+MARKER = '[detail-errors patch v2]'
+MARKER_V1 = '[detail-errors patch]'
 BACKUP_SUFFIX = '.orig-detail'
 
 ANCHOR = """                if upstream_code in ('insufficient_quota', 'quota_exceeded', 'billing_hard_limit_reached'):
                     code, retryable = 'quota_exceeded', False
                 raise errors.RequesterError(message, code=code, retryable=retryable, **metadata) from e"""
 
-REPLACEMENT = """                if upstream_code in ('insufficient_quota', 'quota_exceeded', 'billing_hard_limit_reached'):
+REPLACEMENT_V1 = """                if upstream_code in ('insufficient_quota', 'quota_exceeded', 'billing_hard_limit_reached'):
                     code, retryable = 'quota_exceeded', False
                 # [detail-errors patch] 保留上游原始报错，否则 400 永远只剩一句"参数错误"
                 if isinstance(upstream_error, dict):
                     _upstream_detail = str(upstream_error.get('message') or '').strip()
                     if _upstream_detail and _upstream_detail not in message:
                         message = f'{message}: {_upstream_detail}'
+                raise errors.RequesterError(message, code=code, retryable=retryable, **metadata) from e"""
+
+# v2：body 不是 dict 时（litellm 常把原始报文塞在异常字符串里）退而取 str(e)
+REPLACEMENT = """                if upstream_code in ('insufficient_quota', 'quota_exceeded', 'billing_hard_limit_reached'):
+                    code, retryable = 'quota_exceeded', False
+                # [detail-errors patch v2] 保留上游原始报错，否则 400 永远只剩一句"参数错误"
+                _detail = ''
+                if isinstance(upstream_error, dict):
+                    _detail = str(upstream_error.get('message') or '').strip()
+                if not _detail:
+                    _detail = str(e).strip()[:400]
+                if _detail and _detail not in message:
+                    message = f'{message}: {_detail}'
                 raise errors.RequesterError(message, code=code, retryable=retryable, **metadata) from e"""
 
 
@@ -74,13 +88,20 @@ def patch_one(path: str, dry_run: bool) -> str:
         text = handle.read()
 
     if MARKER in text:
-        return '已打过补丁'
-    if ANCHOR not in text:
+        return '已是 v2'
+    if MARKER_V1 in text:
+        new_text = text.replace(REPLACEMENT_V1, REPLACEMENT, 1)
+        if new_text == text:
+            return 'v1 补丁块与预期不符，请手动处理'
+        action = '已升级到 v2'
+    elif ANCHOR in text:
+        new_text = text.replace(ANCHOR, REPLACEMENT, 1)
+        action = '已打补丁'
+    else:
         return '结构不匹配（版本不同？），跳过'
 
-    new_text = text.replace(ANCHOR, REPLACEMENT, 1)
     if dry_run:
-        return '将打补丁'
+        return '将打补丁' if action == '已打补丁' else '将升级到 v2'
 
     backup = path + BACKUP_SUFFIX
     if not os.path.exists(backup):
@@ -96,7 +117,7 @@ def patch_one(path: str, dry_run: bool) -> str:
         with open(path, 'w', encoding='utf-8') as handle:
             handle.write(text)
         return f'编译失败已还原：{exc}'
-    return '已打补丁'
+    return action
 
 
 def revert_one(path: str) -> str:
