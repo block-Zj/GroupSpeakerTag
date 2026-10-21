@@ -8,7 +8,7 @@
 
 适用：LangBot 4.10.x / 4.11.x（`uvx langbot` 或 Docker）+ NapCat（OneBot v11）接 QQ。
 
-当前版本：**0.4.3**
+当前版本：**0.4.4**
 
 ---
 
@@ -294,6 +294,46 @@ LangBot 4.11 会把它们原样重放进请求。DeepSeek 收到空 content 直�
 > 想知道真实原因，用仓库根的 `patch-detailed-errors.py` 打一个补丁，
 > 之后日志里会带上 DeepSeek 返回的 `error.message`。
 
+## 二·九、v0.4.4：更正 —— 插件里的"消毒层"对 LocalAgent 无效
+
+这是我必须纠正的一个判断。v0.4.1 ~ v0.4.3 都声称"在请求发出前清洗历史"，
+**实测下来对实际发出去的请求没有作用**。
+
+### 证据（LangBot 源码注释）
+
+`pkg/agent/runner/transcript_store.py:274-282`：
+
+```python
+def load_history(...):
+    """Project Transcript rows into the legacy provider Message view.
+
+    Runner history is canonical in Transcript. This view exists for
+    legacy Pipeline readers such as PromptPreProcessing that still expect
+    query.messages.
+    """
+```
+
+翻成大白话：**AgentRunner（LocalAgent）直接读 Transcript 表**，
+`PromptPreProcessing` 拿到的 `query.messages` 只是给旧管线看的兼容视图。
+插件在里面改得再干净，也只改了那个视图，模型照样收到原始的行。
+
+### 为什么之前看起来"有效"
+
+因为每次都是**同时**做了数据库清理。真正起作用的是清库，不是消毒层。
+判断依据很清楚：13:59 那次失败与 14:05 清库之后成功之间，进程、插件、配置都没变，
+唯一变化就是库里那 5 条 `image_url` 被换成了 `[图片]`。
+
+### 真正的防线
+
+用仓库根的 **`patch-history-sanitize.py`**，它打两个点：
+
+| 位置 | 作用 |
+|---|---|
+| `transcript_store._transcript_item_to_provider_message()` | **历史投影的必经之路**，在这里把 `image_url` / 空 `image_base64` / `file_*` / 空内容降级成文本 |
+| `query_entry_adapter.py` 的 `if not contents` 回退分支 | 图片只有 url 没有 base64 时，原本会生成 `image_url`（毒源），改成输出 `[图片]` |
+
+插件里的消毒代码保留着（对旧管线路径有效），但**不要再指望它挡 400**。
+
 ---
 
 ## 三、安装
@@ -301,7 +341,7 @@ LangBot 4.11 会把它们原样重放进请求。DeepSeek 收到空 content 直�
 ### 方式 A（推荐）：网页上传 .lbpkg
 
 1. 面板 `http://127.0.0.1:5300` → **添加扩展**（Add Extension）。
-2. 上传 `GroupSpeakerTag-0.4.3.lbpkg`。
+2. 上传 `GroupSpeakerTag-0.4.4.lbpkg`。
    - 如果你还装着 0.2.x / 0.3.x，**先卸载旧版再装**（手传的包没有"升级"按钮），
      否则可能出现两个版本并存。
 3. 面板 → **插件**，确认已启用。
@@ -352,7 +392,7 @@ LangBot 4.11 会把它们原样重放进请求。DeepSeek 收到空 content 直�
 `!whoami` 输出示例：
 
 ```
-【发言人标记 · 自检 v0.4.3】
+【发言人标记 · 自检 v0.4.4】
 会话：group_123456　← 同群所有人共用这一份上下文
 群名：XX交流群
 本次发言人：张三　ID：10001

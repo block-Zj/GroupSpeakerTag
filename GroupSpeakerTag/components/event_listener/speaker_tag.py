@@ -30,6 +30,18 @@
 4. 自检命令（v4 已移除全部内置命令，命令只能由插件提供）
    !whoami —— 报告发言人身份、将要加的前缀、打标与图片统计
    !prompt —— 打印系统提示词 + 最近历史（默认仅管理员/私聊）
+
+⚠ 实测结论（v0.4.4 修正）：`PromptPreProcessing` 里的「历史消毒」对 LocalAgent **无效**。
+LangBot 4.11 的 transcript_store.load_history() 注释写得很清楚：
+
+    Runner history is canonical in Transcript. This view exists for
+    legacy Pipeline readers such as PromptPreProcessing that still expect
+    query.messages.
+
+也就是说 AgentRunner 直接从 Transcript 表读历史，插件改的 query.messages 只是兼容视图，
+模型根本看不到。真正的防线是配套补丁 `patch-history-sanitize.py`
+（在 transcript_store 投影消息时清理 + 在 query_entry_adapter 回退分支不再生成 image_url）。
+本插件里的消毒代码仍保留（对旧管线路径有效），但**不要指望它挡 400**。
 """
 
 from __future__ import annotations
@@ -45,7 +57,7 @@ from langbot_plugin.api.entities import context, events
 from langbot_plugin.api.entities.builtin.platform import message as platform_message
 from langbot_plugin.api.entities.builtin.provider.message import ContentElement, Message
 
-PLUGIN_VERSION = '0.4.3'
+PLUGIN_VERSION = '0.4.4'
 
 DEFAULT_TAG_FORMAT = '【{name}（QQ:{id}）】'
 
