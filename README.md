@@ -31,24 +31,34 @@ LangBot（v4）插件：让 QQ 群里的 AI 认得出**谁在说话**、看得�
 GroupSpeakerTag/                            插件源码（manifest.yaml 在根）
   components/event_listener/speaker_tag.py  全部逻辑
 GroupSpeakerTag-0.4.4.lbpkg                 发布包，可直接上传安装
-GroupSpeakerTag-离线自检.py                  10 项断言的离线验证脚本
+GroupSpeakerTag-离线自检.py                  12 项断言的离线验证脚本
+VERSIONS.md                               历史版本索引（各版 lbpkg 下载 + SHA256）
+patch-*.py                                三个可选补丁（静音 / 详细报错 / 历史消毒）
+start-langbot.bat                         一键启动（锁定 langbot+sqlalchemy 组合）
 QQ机器人_DeepSeek_保姆级部署指南.md           本机部署记录
 ```
 
-## 版本
+## 版本与历史包
 
-当前 **v0.4.4**（tag `v0.4.4`）。
+当前 **v0.4.4**（tag `v0.4.4`）。**每个版本的 `.lbpkg` 都跟着 git tag 存档，随时可回退下载**
+→ 见 **[VERSIONS.md](VERSIONS.md)**（含直接下载链接与 SHA256）。
 
-| 版本 | 主要变更 |
-|---|---|
-| 0.1.0 | 发言人标记 |
-| 0.2.x | 修 SDK 版本兼容（`get_plugin_config` 在 0.5.8 上不存在）、加 `!whoami` |
-| 0.3.0 | 图片改本地转 base64，移除 `from_image_url` |
-| 0.4.0 | QQ 表情 / 骰子 / 猜拳 / 表情包文本化 |
-| 0.4.1 | 请求前清洗历史图片（远程链接 / 空 base64 → `[图片]`），一条坏记录不再拖垮整个会话 |
-| 0.4.2 | 自检报告区分“配置为空”与“读取失败”，并显示历史图片消毒计数 |
-| 0.4.3 | 空消息补齐（空 content → `[空白消息]`） |
-| 0.4.4 | 更正：插件消毒层对 LocalAgent 无效，真正的防线改由 `patch-history-sanitize.py` 承担 |
+| 版本 | 主要变更 | 下载 |
+|---|---|---|
+| 0.4.4 | 更正：插件消毒层对 LocalAgent 无效，防线改由 `patch-history-sanitize.py` 承担 | [lbpkg](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.4.4/GroupSpeakerTag-0.4.4.lbpkg) |
+| 0.4.3 | 空消息补齐（空 content → `[空白消息]`） | [lbpkg](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.4.3/GroupSpeakerTag-0.4.3.lbpkg) |
+| 0.4.2 | 自检报告区分“配置为空”与“读取失败”，显示历史图片消毒计数 | [lbpkg](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.4.2/GroupSpeakerTag-0.4.2.lbpkg) |
+| 0.4.1 | 请求前清洗历史图片（远程链接 / 空 base64 → `[图片]`）⚠ 实测对 LocalAgent 无效 | [lbpkg](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.4.1/GroupSpeakerTag-0.4.1.lbpkg) |
+| 0.4.0 | 发言人标记 + 图片本地转 base64 + QQ 表情文本化 + `!whoami` / `!prompt` | [lbpkg](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.4.0/GroupSpeakerTag-0.4.0.lbpkg) |
+
+> v0.1.0 ~ v0.3.0 是建仓前的开发中间产物，**未进 git**，无法回溯。
+
+其他版本形态：
+
+```bash
+# 拉某个版本的完整源码
+git clone --branch v0.4.1 --depth 1 https://github.com/block-Zj/GroupSpeakerTag.git
+```
 
 ## 兼容性
 
