@@ -12,13 +12,14 @@ LangBot（v4）插件：让 QQ 群里的 AI 认得出**谁在说话**、看得�
 | QQ 图片识别不了 | 4.11 新适配器不填 `base64`，内核只发 `base64`，图片被静默丢弃 | 本机下载图片转 `data:` URI，`image-mode` 可选 `auto` / `skip` |
 | QQ 表情被吃掉 | 内核 `preproc` 里没有 `Face` 分支 | `[表情]微笑`、`[表情]5点的骰子`、`[表情]猜拳(剪刀)`、`[动画表情]` |
 | `!prompt` / `!reset` 等命令报"未知命令" | v4 已移除全部内置命令 | 插件自带 `!whoami`（自检）与 `!prompt`（提示词快照） |
+| 群里太吵想让它闭嘴 | 只能改触发规则或关机器人 | 发「灵灵安静」即静默拦截，发「灵灵」恢复 |
 
 > 注意：`from_image_url` 在本插件中**被明确禁止**。QQ CDN 链接带一次性 `rkey` 与来源校验，
 > 第三方服务端抓不到，直接透传 URL 会导致模型侧 `Failed to download image` 400。
 
 ## 安装
 
-1. 下载 `GroupSpeakerTag-0.4.4.lbpkg`
+1. 下载 `GroupSpeakerTag-0.5.0.lbpkg`
 2. 面板 → 添加扩展 → 上传该文件（若装着旧版，先卸载再装；手传包没有"升级"按钮）
 3. 面板 → 流水线 → 插件/扩展设置，**把插件绑定到这条流水线**（漏了等于没装）
 4. 群里 `@机器人 !whoami` 验证
@@ -30,7 +31,7 @@ LangBot（v4）插件：让 QQ 群里的 AI 认得出**谁在说话**、看得�
 ```
 GroupSpeakerTag/                            插件源码（manifest.yaml 在根）
   components/event_listener/speaker_tag.py  全部逻辑
-GroupSpeakerTag-0.4.4.lbpkg                 发布包，可直接上传安装
+GroupSpeakerTag-0.5.0.lbpkg                 发布包，可直接上传安装
 GroupSpeakerTag-离线自检.py                  12 项断言的离线验证脚本
 VERSIONS.md                               历史版本索引（各版 lbpkg 下载 + SHA256）
 patch-*.py                                三个可选补丁（静音 / 详细报错 / 历史消毒）
@@ -40,11 +41,12 @@ QQ机器人_DeepSeek_保姆级部署指南.md           本机部署记录
 
 ## 版本与历史包
 
-当前 **v0.4.4**（tag `v0.4.4`）。**每个版本的 `.lbpkg` 都跟着 git tag 存档，随时可回退下载**
+当前 **v0.5.0**（tag `v0.5.0`）。**每个版本的 `.lbpkg` 都跟着 git tag 存档，随时可回退下载**
 → 见 **[VERSIONS.md](VERSIONS.md)**（含直接下载链接与 SHA256）。
 
 | 版本 | 主要变更 | 下载 |
 |---|---|---|
+| 0.5.0 | **静默开关**：「灵灵安静」→ 拦掉所有消息不再回复，「灵灵」/@ 唤醒；触发词可配置 | [lbpkg](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.5.0/GroupSpeakerTag-0.5.0.lbpkg) |
 | 0.4.4 | 更正：插件消毒层对 LocalAgent 无效，防线改由 `patch-history-sanitize.py` 承担 | [lbpkg](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.4.4/GroupSpeakerTag-0.4.4.lbpkg) |
 | 0.4.3 | 空消息补齐（空 content → `[空白消息]`） | [lbpkg](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.4.3/GroupSpeakerTag-0.4.3.lbpkg) |
 | 0.4.2 | 自检报告区分“配置为空”与“读取失败”，显示历史图片消毒计数 | [lbpkg](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.4.2/GroupSpeakerTag-0.4.2.lbpkg) |

@@ -4,7 +4,7 @@ metadata:
   author: Gareth
   name: GroupSpeakerTag
   repository: https://github.com/ThDWARF/GroupSpeakerTag
-  version: 0.4.4
+  version: 0.5.0
   description:
     en_US: Prefix group messages with the speaker's name and ID, fetch QQ images locally into base64, and turn QQ faces (emoji) into readable text.
     zh_Hans: 给群消息加上「发言人昵称(ID)」前缀；QQ 图片在本地转 base64；QQ 表情转成可读文本。
@@ -63,6 +63,46 @@ spec:
         zh_Hans: "谁可以用 !prompt 查看提示词快照。取值：admin（默认，机器人管理员 + 私聊）/ everyone（群内任何人）/ off（关闭）。注意 everyone 会把系统提示词暴露给群成员。"
       type: string
       default: "admin"
+      required: false
+    - name: mute-triggers
+      label:
+        en_US: Quiet Trigger Words
+        zh_Hans: 静默触发词
+      description:
+        en_US: "When a group message contains any of these, the plugin blocks the message and stops replying until woken. Separate multiple words with commas."
+        zh_Hans: "群里出现这些词时进入静默：插件直接把消息拦掉，不再回复。多个词用逗号分隔，例如：灵灵安静,安静灵灵"
+      type: string
+      default: "灵灵安静"
+      required: false
+    - name: wake-triggers
+      label:
+        en_US: Wake Words
+        zh_Hans: 唤醒词
+      description:
+        en_US: "While muted, a message containing any of these (or an @mention of the bot) resumes normal replies. Separate with commas."
+        zh_Hans: "静默期间，群里出现这些词（或 @机器人）就恢复说话。多个词用逗号分隔，例如：灵灵,出来"
+      type: string
+      default: "灵灵"
+      required: false
+    - name: bot-qq
+      label:
+        en_US: Bot QQ (for @ detection)
+        zh_Hans: 机器人 QQ（用于识别 @）
+      description:
+        en_US: "Optional. Fill in the bot's QQ number so only @-mentions of the bot count as a wake signal. Leave empty to treat any @mention as wake."
+        zh_Hans: "可选。填机器人自己的 QQ 号，这样只有 @她 才算唤醒；留空则任意 @ 都算唤醒（可能被 @ 别人误唤醒）。"
+      type: string
+      default: ""
+      required: false
+    - name: mute-ack
+      label:
+        en_US: Quiet Acknowledge Text
+        zh_Hans: 静默应答语
+      description:
+        en_US: "Reply once when entering quiet mode. Leave empty for a completely silent switch."
+        zh_Hans: "进入静默时回一句确认（例如：灵灵先不说话了喵）。留空则完全静默，一个字都不发。"
+      type: string
+      default: ""
       required: false
   components:
     EventListener:

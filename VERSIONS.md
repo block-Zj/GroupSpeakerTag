@@ -6,7 +6,8 @@
 
 | 版本 | 日期 | 包大小 | 直接下载 | SHA256（前 16 位） |
 |---|---|---|---|---|
-| **v0.4.4**（最新） | 2026-10-21 | 21.8 KB | [下载](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.4.4/GroupSpeakerTag-0.4.4.lbpkg) | `644adee1ca331ba0` |
+| **v0.5.0**（最新） | 2026-10-22 | 25.1 KB | [下载](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.5.0/GroupSpeakerTag-0.5.0.lbpkg) | `35953eec624281e5` |
+| v0.4.4 | 2026-10-21 | 21.8 KB | [下载](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.4.4/GroupSpeakerTag-0.4.4.lbpkg) | `644adee1ca331ba0` |
 | v0.4.3 | 2026-10-21 | 20.0 KB | [下载](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.4.3/GroupSpeakerTag-0.4.3.lbpkg) | `b6f11d497d5c351f` |
 | v0.4.2 | 2026-10-21 | 19.0 KB | [下载](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.4.2/GroupSpeakerTag-0.4.2.lbpkg) | `4d211b53f0d7d1f3` |
 | v0.4.1 | 2026-10-19 | 18.5 KB | [下载](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.4.1/GroupSpeakerTag-0.4.1.lbpkg) | `58270e95797f95c6` |
@@ -21,7 +22,8 @@
 
 | 版本 | 主要变更 |
 |---|---|
-| **v0.4.4** | 更正文档：说明插件内的「请求前消毒」对 LocalAgent 无效（runner 直读 Transcript），真正的防线改为配套补丁 `patch-history-sanitize.py`。代码行为与 0.4.3 一致。 |
+| **v0.5.0** | 静默开关：群里出现「灵灵安静」即拦截全部消息、不再回复；发「灵灵」或 @她 恢复。触发词可配置。 |
+| v0.4.4 | 更正文档：说明插件内的「请求前消毒」对 LocalAgent 无效（runner 直读 Transcript），真正的防线改为配套补丁 `patch-history-sanitize.py`。代码行为与 0.4.3 一致。 |
 | **v0.4.3** | 空消息补齐：`content` 为空数组 / 空串 / 纯空白 → `[空白消息]`。修 `Invalid request parameters` 的一个来源。 |
 | **v0.4.2** | 自检报告修正：区分「配置为空」与「读取失败」，新增「历史图片消毒」计数。 |
 | **v0.4.1** | 请求前清洗历史图片（远程 `image_url` / 空 `image_base64` → `[图片]`）。⚠ 实测对 LocalAgent 无效，见 v0.4.4 说明。 |

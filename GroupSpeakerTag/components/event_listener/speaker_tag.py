@@ -49,6 +49,7 @@ from __future__ import annotations
 import asyncio
 import ast
 import base64
+import datetime
 import typing
 import urllib.request
 
@@ -57,7 +58,7 @@ from langbot_plugin.api.entities import context, events
 from langbot_plugin.api.entities.builtin.platform import message as platform_message
 from langbot_plugin.api.entities.builtin.provider.message import ContentElement, Message
 
-PLUGIN_VERSION = '0.4.4'
+PLUGIN_VERSION = '0.5.0'
 
 DEFAULT_TAG_FORMAT = '【{name}（QQ:{id}）】'
 
@@ -84,6 +85,10 @@ IMAGE_TIMEOUT_SECONDS = 10.0
 PLACEHOLDER_IMAGE = '[图片]'
 PLACEHOLDER_FILE = '[文件]'
 PLACEHOLDER_BLANK = '[空白消息]'
+
+# 静默开关的默认触发词（都可在插件配置里改，多个用逗号分隔）
+DEFAULT_MUTE_TRIGGERS = '灵灵安静'
+DEFAULT_WAKE_TRIGGERS = '灵灵'
 
 DIAGNOSTIC_COMMANDS = ('whoami', 'speaker', 'prompt')
 
@@ -157,7 +162,13 @@ _STATE: dict[str, typing.Any] = {
     'sanitized_total': 0,
     'last_sanitize': '',
     'blank_fixed': 0,
+    'blocked': 0,
+    'muted_total': 0,
 }
+
+# 静默开关：group_id -> {'muted': bool, 'by': str, 'at': str}
+# 只放内存，不落盘 —— 重启 LangBot 自动恢复说话，避免"忘了自己关了"。
+_MUTE: dict[str, dict[str, typing.Any]] = {}
 
 
 def _note_tag(tag: str, sender: str) -> None:
@@ -345,6 +356,69 @@ def _as_bool(value: typing.Any, default: bool = True) -> bool:
     if text in ('', 'none', 'null'):
         return default
     return text in ('1', 'true', 'yes', 'on', '是', '开')
+
+
+# --------------------------------------------------------------------------
+# 静默开关
+# --------------------------------------------------------------------------
+
+
+def _split_triggers(value: typing.Any, default: str) -> list[str]:
+    """把配置里的触发词拆成列表：支持中英文逗号、分号、竖线、空格。"""
+
+    raw = str(value or '').strip() or default
+    for sep in ('，', '；', '|', ';', '\n', ' '):
+        raw = raw.replace(sep, ',')
+    items = [item.strip() for item in raw.split(',') if item.strip()]
+    return items or [default]
+
+
+def _is_at_bot(chain: typing.Any, bot_qq: str) -> bool:
+    """消息链里有没有 @ 机器人。
+
+    配了 bot-qq 就精确比对 target；没配时退化为"任意 At 都算"，
+    好处是零配置可用，代价是 @ 别人也会被当成唤醒信号。
+    注意：唤醒只是解除静默，是否真的回复仍由流水线的触发规则决定。
+    """
+
+    for component in chain or []:
+        if not isinstance(component, platform_message.At):
+            continue
+        if not bot_qq:
+            return True
+        if str(getattr(component, 'target', '') or '') == str(bot_qq):
+            return True
+    return False
+
+
+def _quiet_action(
+    text: str,
+    is_at_me: bool,
+    muted: bool,
+    mute_triggers: list[str],
+    wake_triggers: list[str],
+) -> str:
+    """决定这条消息怎么处理：mute / unmute / block / pass。
+
+    顺序很重要：先判静默词，再判唤醒词 —— 否则"灵灵安静"会先命中唤醒词"灵灵"。
+    """
+
+    lowered = (text or '').strip().lower()
+    if any(trigger.lower() in lowered for trigger in mute_triggers):
+        return 'mute'
+
+    if muted:
+        if is_at_me:
+            return 'unmute'
+        if any(trigger.lower() in lowered for trigger in wake_triggers):
+            return 'unmute'
+        return 'block'
+
+    return 'pass'
+
+
+def _note_blocked() -> None:
+    _STATE['blocked'] = int(_STATE.get('blocked') or 0) + 1
 
 
 def _image_mode(value: typing.Any) -> str:
@@ -648,6 +722,18 @@ async def _build_identity_report(event_context: context.EventContext, config: di
     blanks = int(_STATE.get('blank_fixed') or 0)
     if blanks:
         lines.append(f'空消息补齐：累计 {blanks} 处 → [空白消息]')
+
+    mute_triggers = _split_triggers(config.get('mute-triggers'), DEFAULT_MUTE_TRIGGERS)
+    wake_triggers = _split_triggers(config.get('wake-triggers'), DEFAULT_WAKE_TRIGGERS)
+    state = _MUTE.get(session_id or '') or {}
+    if state.get('muted'):
+        lines.append(
+            f'静默开关：**已静默**（{state.get("by", "?")} 于 {state.get("at", "?")} 触发，'
+            f'已拦 {_STATE.get("blocked", 0)} 条）'
+        )
+    else:
+        lines.append(f'静默开关：正常（累计进入静默 {_STATE.get("muted_total", 0)} 次）')
+    lines.append('静默词：' + ' / '.join(mute_triggers) + '　唤醒词：' + ' / '.join(wake_triggers) + '（@ 也算）')
     if _STATE.get('last_image_error'):
         lines.append(f'⚠ 最近一次图片失败：{_STATE["last_image_error"]}')
     if _STATE.get('last_error'):
@@ -733,6 +819,58 @@ async def _maybe_handle_diagnostic(component: typing.Any, event_context: context
 class GroupSpeakerTagEventListener(EventListener):
     async def initialize(self) -> None:
         await super().initialize()
+
+        @self.handler(events.GroupMessageReceived)
+        async def on_group_message_received(event_context: context.EventContext) -> None:
+            """静默开关：在任何处理之前拦截，决定这条群消息要不要继续走。
+
+            这个事件由 pipelinemgr 在进入流水线各阶段**之前**发出，
+            宿主会检查 event_ctx.is_prevented_default()，为真就直接 return，
+            所以 prevent_default() 是真正意义上的"拦掉"，而不是假装安静。
+            """
+
+            try:
+                config = _plugin_config(self)
+                event = event_context.event
+                raw_group = str(getattr(event, 'launcher_id', '') or '')
+                if not raw_group:
+                    return
+                # 与 !whoami 里的 session_id 保持同一套键（group_<群号>）
+                group_id = f'group_{raw_group}'
+
+                text = _plain_text_of(getattr(event, 'message_chain', None))
+                mute_triggers = _split_triggers(config.get('mute-triggers'), DEFAULT_MUTE_TRIGGERS)
+                wake_triggers = _split_triggers(config.get('wake-triggers'), DEFAULT_WAKE_TRIGGERS)
+                bot_qq = str(config.get('bot-qq') or '').strip()
+                at_me = _is_at_bot(getattr(event, 'message_chain', None), bot_qq)
+
+                state = _MUTE.setdefault(group_id, {'muted': False})
+                action = _quiet_action(text, at_me, bool(state.get('muted')), mute_triggers, wake_triggers)
+
+                if action == 'mute':
+                    state['muted'] = True
+                    state['by'] = str(getattr(event, 'sender_id', '') or '')
+                    state['at'] = datetime.datetime.now().strftime('%m-%d %H:%M:%S')
+                    _STATE['muted_total'] = int(_STATE.get('muted_total') or 0) + 1
+                    event_context.prevent_default()
+                    ack = str(config.get('mute-ack') or '').strip()
+                    if ack:
+                        await event_context.reply(platform_message.MessageChain([platform_message.Plain(text=ack)]))
+                    return
+
+                if action == 'unmute':
+                    state['muted'] = False
+                    return  # 放行：让这条消息正常进入流水线
+
+                if action == 'block':
+                    _note_blocked()
+                    event_context.prevent_default()
+                    return
+
+            except Exception as exc:
+                # 静默开关绝不能让正常聊天挂掉：出错就放行
+                _note_error(exc)
+                return
 
         @self.handler(events.GroupNormalMessageReceived)
         async def on_group_normal_message(event_context: context.EventContext) -> None:

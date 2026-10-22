@@ -8,7 +8,7 @@
 
 适用：LangBot 4.10.x / 4.11.x（`uvx langbot` 或 Docker）+ NapCat（OneBot v11）接 QQ。
 
-当前版本：**0.4.4**
+当前版本：**0.5.0**
 
 ---
 
@@ -334,6 +334,50 @@ def load_history(...):
 
 插件里的消毒代码保留着（对旧管线路径有效），但**不要再指望它挡 400**。
 
+## 五·五、静默开关（v0.5.0）
+
+### 怎么用
+
+```
+群里有人说：灵灵安静        → 插件拦掉这条，并进入静默
+（之后群里说什么她都不回，消息根本不进流水线，不烧 token）
+有人说：灵灵 / @灵灵 一句   → 立即恢复，这条消息正常处理
+```
+
+| 配置项 | 默认 | 说明 |
+|---|---|---|
+| `mute-triggers` | `灵灵安静` | 出现即静默，多个用逗号分隔（如 `灵灵安静,安静灵灵`） |
+| `wake-triggers` | `灵灵` | 静默期间出现即恢复；@机器人 无条件唤醒 |
+| `bot-qq` | 空 | 填机器人 QQ 后只认 @她；留空则任意 @ 都算唤醒 |
+| `mute-ack` | 空 | 进入静默时回一句（如「灵灵先不说话了喵」）；留空完全不出声 |
+
+### 为什么这次是真拦得住
+
+`GroupMessageReceived` 由 `pipelinemgr` 在**进入流水线各阶段之前**发出：
+
+```python
+event_ctx = await self.ap.plugin_connector.emit_event(event_obj, bound_plugins)
+if event_ctx.is_prevented_default():
+    logger.debug('MessageReceived event prevented default ...')
+    return                      # ← 直接 return，后面的触发规则/模型/回复全都不执行
+query.message_chain = event_ctx.event.message_chain
+await self._execute_from_stage(0, query)
+```
+
+所以插件里调用 `event_context.prevent_default()` 是**真拦**：
+消息不会进触发规则、不会调模型、不会有任何回复，连监控里都不会记一条。
+
+> 对比：`PromptPreProcessing` 是流程后半段的钩子，只能改请求内容，拦不住流程
+> （这也是 v0.4.x 消毒层无效的原因，见上一节）。
+
+### 边界
+
+- **静默状态只存内存，不落盘。** 重启 LangBot 自动恢复说话，避免"忘了自己关过"。
+- 静默期间 `!whoami` 等命令也会被拦（因为整条消息都不进流水线）。
+  想查状态：先发「灵灵」恢复，或者直接看 `!whoami`。
+- 唤醒只是"解除静默"，是否真的回你，仍由流水线的触发规则（@ / 前缀 / 随机）决定。
+- 静默按**群**生效，不同群互不影响。
+
 ---
 
 ## 三、安装
@@ -341,7 +385,7 @@ def load_history(...):
 ### 方式 A（推荐）：网页上传 .lbpkg
 
 1. 面板 `http://127.0.0.1:5300` → **添加扩展**（Add Extension）。
-2. 上传 `GroupSpeakerTag-0.4.4.lbpkg`。
+2. 上传 `GroupSpeakerTag-0.5.0.lbpkg`。
    - 如果你还装着 0.2.x / 0.3.x，**先卸载旧版再装**（手传的包没有"升级"按钮），
      否则可能出现两个版本并存。
 3. 面板 → **插件**，确认已启用。
@@ -371,6 +415,10 @@ def load_history(...):
 | `inject-guide` | 开 | 追加系统说明，告诉模型标记的含义 |
 | `tag-quote` | 开 | 成员用「回复」功能时，把被引用原文带上并标注来源 |
 | `prompt-dump-scope` | `admin` | `!prompt` 权限：`admin`（管理员+私聊）/ `everyone` / `off` |
+| `mute-triggers` | `灵灵安静` | 静默触发词，多个用逗号分隔 |
+| `wake-triggers` | `灵灵` | 唤醒词，多个用逗号分隔；@机器人 也算唤醒 |
+| `bot-qq` | 空 | 填机器人 QQ 后，只有 @她 才算唤醒；留空则任意 @ 都算 |
+| `mute-ack` | 空 | 进入静默时回一句确认；留空 = 完全静默 |
 
 `tag-format` 里 `{name}` 取 **群名片优先、其次昵称、最后 QQ 号**（与 LangBot 内部一致）。
 
@@ -392,7 +440,7 @@ def load_history(...):
 `!whoami` 输出示例：
 
 ```
-【发言人标记 · 自检 v0.4.4】
+【发言人标记 · 自检 v0.5.0】
 会话：group_123456　← 同群所有人共用这一份上下文
 群名：XX交流群
 本次发言人：张三　ID：10001

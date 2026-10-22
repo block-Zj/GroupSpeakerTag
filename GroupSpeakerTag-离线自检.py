@@ -119,7 +119,7 @@ async def main():
     listener.plugin = FakePlugin(cfg)
     await listener.initialize()
     registered = {k.__name__: len(v) for k, v in listener.registered_handlers.items()}
-    for name in ("GroupNormalMessageReceived", "PromptPreProcessing", "GroupCommandSent", "PersonCommandSent"):
+    for name in ("GroupMessageReceived", "GroupNormalMessageReceived", "PromptPreProcessing", "GroupCommandSent", "PersonCommandSent"):
         assert name in registered, f"缺少事件 {name}"
     print(f"[3] 事件注册通过: {registered}")
 
@@ -241,6 +241,29 @@ async def main():
     again = st._sanitize_blank_messages([Message(role="user", content="[空白消息]")])
     assert again == 0, "占位文本不应被再次处理"
     print(f"[12] 空消息补齐通过: {fixed} 处 → [空白消息]，且幂等")
+
+
+    # ------------------------------------------------------------ 静默开关判定
+    mute_triggers = st._split_triggers("灵灵安静, 安静灵灵", "灵灵安静")
+    wake_triggers = st._split_triggers("灵灵", "灵灵")
+    assert mute_triggers == ["灵灵安静", "安静灵灵"], mute_triggers
+
+    cases = [
+        ("灵灵安静", False, False, "mute"),      # 正常状态下收到静默词
+        ("灵灵安静", False, True, "mute"),       # 已静默时再收到静默词
+        ("灵灵安静一点", False, False, "mute"),  # 包含即可
+        ("今天天气不错", False, True, "block"),  # 静默期间普通消息 -> 拦截
+        ("灵灵", False, True, "unmute"),         # 唤醒词
+        ("灵灵在吗", False, True, "unmute"),     # 含唤醒词
+        ("随便说说", True, True, "unmute"),      # @ 她 -> 唤醒
+        ("灵灵", False, False, "pass"),          # 未静默时正常放行
+        ("随便说说", True, False, "pass"),       # 未静默时 @ 不影响
+    ]
+    for text, at_me, muted, expect in cases:
+        got = st._quiet_action(text, at_me, muted, mute_triggers, wake_triggers)
+        assert got == expect, f"{text!r} at={at_me} muted={muted}: 期望 {expect}，实际 {got}"
+
+    print(f"[13] 静默开关判定通过: {len(cases)} 个用例（静默/拦截/唤醒/@唤醒/放行）")
 
 
 asyncio.run(main())
