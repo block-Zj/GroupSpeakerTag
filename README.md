@@ -70,6 +70,47 @@ git clone --branch v0.4.1 --depth 1 https://github.com/block-Zj/GroupSpeakerTag.
 配置读取走三路兜底（`get_plugin_config` → `plugin.get_config` → `plugin.config`），
 两代 SDK 均已离线验证通过。
 
+## 静默回复（模型自己决定不说话）
+
+### 为什么需要补丁
+
+LangBot 的插件事件全是**入站**的（`MessageReceived` / `GroupNormalMessageReceived` /
+`PromptPreProcessing` / `CommandSent`…），**没有「发送前」事件**。
+所以"模型输出了 `[[SILENT]]` 就把这条回复吞掉"这件事，插件层做不到，
+只能在发送阶段拦——也就是 `pkg/pipeline/respback/respback.py`。
+
+### 判定规则
+
+1. 把这条回复里所有文本拼起来；
+2. 命中标记（默认 `[[SILENT]]`）→ 把标记剥掉；
+3. 剥完**没有任何文字、也没有图片等其它段** → 整条丢弃，不发送；
+   剥完还剩正文（或还有图片）→ 发送清理后的内容。
+
+也就是说：模型只回 `[[SILENT]]` 时，群里**什么都看不到**；
+如果它写「好的[[SILENT]]」，群里会收到「好的」。
+
+### 标记词怎么改
+
+编辑 `data/silent-reply-markers.txt`（一行一个，`#` 注释，大小写不敏感），重启生效：
+
+```
+[[SILENT]]
+[[静默]]
+```
+
+也可以用环境变量临时覆盖：`LANGBOT_SILENT_MARKERS="[[SILENT]],[[静默]]"`（优先级最高）。
+
+### 装上/卸下
+
+```bash
+python patch-silent-reply.py            # 打补丁
+python patch-silent-reply.py --revert   # 还原
+```
+
+**必须重启 LangBot 生效。** 升级 LangBot 或清 uv 缓存后需重新跑一次。
+
+---
+
 ## 配套补丁
 
 LangBot 把上游模型的原始报错吃掉了，只留一句 `Invalid request parameters`。两个可选补丁：
@@ -79,6 +120,7 @@ LangBot 把上游模型的原始报错吃掉了，只留一句 `Invalid request 
 | `patch-silent-runner-errors.py` | runner 出错不再往群里发提示（错误只进日志/面板） |
 | `patch-detailed-errors.py` | 保留上游原始报错，日志里能看到真实 400 原因 |
 | `patch-history-sanitize.py` | **核心**：在 Transcript 读取入口清掉失效图片/空消息，从根上挡 400 |
+| `patch-silent-reply.py` | 模型只输出 `[[SILENT]]` 时**不发送**这条回复（标记词可配置） |
 
 都支持 `--dry-run` / `--revert`，升级 LangBot 或清 uv 缓存后重跑一次即可。
 
