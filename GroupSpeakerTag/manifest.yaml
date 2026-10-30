@@ -4,7 +4,7 @@ metadata:
   author: Gareth
   name: GroupSpeakerTag
   repository: https://github.com/ThDWARF/GroupSpeakerTag
-  version: 0.6.0
+  version: 0.7.0
   description:
     en_US: Prefix group messages with the speaker's name and ID, fetch QQ images locally into base64, and turn QQ faces (emoji) into readable text.
     zh_Hans: 给群消息加上「发言人昵称(ID)」前缀；QQ 图片在本地转 base64；QQ 表情转成可读文本。
@@ -103,6 +103,26 @@ spec:
         zh_Hans: "进入静默时回一句确认（例如：灵灵先不说话了喵）。留空则完全静默，一个字都不发。"
       type: string
       default: ""
+      required: false
+    - name: silent-tools
+      label:
+        en_US: Silent Tool Names
+        zh_Hans: 保持安静的工具名
+      description:
+        en_US: "If any of these tools was called this turn, the whole reply is suppressed. Separate with commas."
+        zh_Hans: "本轮调用了这些工具时，整条回复都不发送。多个用逗号分隔，默认 stay_silent,no_reply,silent"
+      type: string
+      default: "stay_silent,no_reply,silent"
+      required: false
+    - name: silent-marks
+      label:
+        en_US: Silent Text Marks
+        zh_Hans: 静默文字标记
+      description:
+        en_US: "Fallback: if the reply is only these marks, it is suppressed; if mixed with text, the marks are stripped before sending."
+        zh_Hans: "兜底：回复只剩这些标记时不发送；混在正文里则剥掉标记后照发。多个用逗号分隔。"
+      type: string
+      default: "[[SILENT]],[[silent]],[[静默]]"
       required: false
   components:
     EventListener:

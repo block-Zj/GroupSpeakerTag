@@ -19,7 +19,7 @@ LangBot（v4）插件：让 QQ 群里的 AI 认得出**谁在说话**、看得�
 
 ## 安装
 
-1. 下载 `GroupSpeakerTag-0.6.0.lbpkg`
+1. 下载 `GroupSpeakerTag-0.7.0.lbpkg`
 2. 面板 → 添加扩展 → 上传该文件（若装着旧版，先卸载再装；手传包没有"升级"按钮）
 3. 面板 → 流水线 → 插件/扩展设置，**把插件绑定到这条流水线**（漏了等于没装）
 4. 群里 `@机器人 !whoami` 验证
@@ -32,7 +32,7 @@ LangBot（v4）插件：让 QQ 群里的 AI 认得出**谁在说话**、看得�
 GroupSpeakerTag/                            插件源码（manifest.yaml 在根）
   components/event_listener/speaker_tag.py  事件监听（打标/静默开关）
   components/tool/stay_silent.py            工具组件（模型主动选择不回复）
-GroupSpeakerTag-0.6.0.lbpkg                 发布包，可直接上传安装
+GroupSpeakerTag-0.7.0.lbpkg                 发布包，可直接上传安装
 GroupSpeakerTag-离线自检.py                  12 项断言的离线验证脚本
 VERSIONS.md                               历史版本索引（各版 lbpkg 下载 + SHA256）
 patch-*.py                                三个可选补丁（静音 / 详细报错 / 历史消毒）
@@ -42,11 +42,12 @@ QQ机器人_DeepSeek_保姆级部署指南.md           本机部署记录
 
 ## 版本与历史包
 
-当前 **v0.6.0**（tag `v0.6.0`）。**每个版本的 `.lbpkg` 都跟着 git tag 存档，随时可回退下载**
+当前 **v0.7.0**（tag `v0.7.0`）。**每个版本的 `.lbpkg` 都跟着 git tag 存档，随时可回退下载**
 → 见 **[VERSIONS.md](VERSIONS.md)**（含直接下载链接与 SHA256）。
 
 | 版本 | 主要变更 | 下载 |
 |---|---|---|
+| 0.7.0 | **出站拦截修正**：改用 `NormalMessageResponded` 事件，按 `funcs_called` 判定，工具调用后整条不发 | [lbpkg](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.7.0/GroupSpeakerTag-0.7.0.lbpkg) |
 | 0.6.0 | **stay_silent 工具**：模型用工具调用表达「不回复」，不再靠 `[[SILENT]]` 文字 | [lbpkg](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.6.0/GroupSpeakerTag-0.6.0.lbpkg) |
 | 0.5.0 | **静默开关**：「灵灵安静」→ 拦掉所有消息不再回复，「灵灵」/@ 唤醒；触发词可配置 | [lbpkg](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.5.0/GroupSpeakerTag-0.5.0.lbpkg) |
 | 0.4.4 | 更正：插件消毒层对 LocalAgent 无效，防线改由 `patch-history-sanitize.py` 承担 | [lbpkg](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.4.4/GroupSpeakerTag-0.4.4.lbpkg) |

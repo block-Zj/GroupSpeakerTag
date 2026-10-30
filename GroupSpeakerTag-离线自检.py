@@ -119,7 +119,7 @@ async def main():
     listener.plugin = FakePlugin(cfg)
     await listener.initialize()
     registered = {k.__name__: len(v) for k, v in listener.registered_handlers.items()}
-    for name in ("GroupMessageReceived", "GroupNormalMessageReceived", "PromptPreProcessing", "GroupCommandSent", "PersonCommandSent"):
+    for name in ("GroupMessageReceived", "GroupNormalMessageReceived", "NormalMessageResponded", "PromptPreProcessing", "GroupCommandSent", "PersonCommandSent"):
         assert name in registered, f"缺少事件 {name}"
     print(f"[3] 事件注册通过: {registered}")
 
@@ -264,6 +264,34 @@ async def main():
         assert got == expect, f"{text!r} at={at_me} muted={muted}: 期望 {expect}，实际 {got}"
 
     print(f"[13] 静默开关判定通过: {len(cases)} 个用例（静默/拦截/唤醒/@唤醒/放行）")
+
+
+    # ------------------------------------------------------------ 出站拦截（工具/标记）
+    silent_tools = st._split_triggers("stay_silent,no_reply,silent", st.DEFAULT_SILENT_TOOLS)
+    silent_marks = st._split_triggers("[[SILENT]],[[silent]],[[静默]]", st.DEFAULT_SILENT_MARKS)
+
+    tool_cases = [
+        (["stay_silent"], True),
+        (["Gareth/GroupSpeakerTag/stay_silent"], True),
+        (["get_weather"], False),
+        ([], False),
+    ]
+    for funcs, expect in tool_cases:
+        got = st._silent_tool_called(funcs, silent_tools)
+        assert got == expect, f"funcs={funcs}: 期望 {expect}，实际 {got}"
+
+    mark_cases = [
+        ("[[SILENT]]", None),
+        ("好的[[SILENT]]", "好的"),
+        ("[[SILENT]] 好的", "好的"),
+        ("（安静）", "（安静）"),
+        ("灵灵在呢喵", "灵灵在呢喵"),
+    ]
+    for text, expect in mark_cases:
+        got = st._strip_silent_marks(text, silent_marks)
+        assert got == expect, f"{text!r}: 期望 {expect!r}，实际 {got!r}"
+
+    print(f"[14] 出站拦截通过: 工具命中 {len(tool_cases)} 例、标记剥离 {len(mark_cases)} 例")
 
 
 asyncio.run(main())

@@ -8,7 +8,7 @@
 
 适用：LangBot 4.10.x / 4.11.x（`uvx langbot` 或 Docker）+ NapCat（OneBot v11）接 QQ。
 
-当前版本：**0.6.0**
+当前版本：**0.7.0**
 
 ---
 
@@ -428,6 +428,57 @@ resp_messages 里有 stay_silent 的 tool_call   → 整条丢弃
 > 可以在系统提示词里加一句："如果要保持安静，调用 stay_silent 工具。"
 > 字符串兜底会保证此时也不会把 `[[SILENT]]` 发出去。
 
+## 五·七、v0.7.0：用 `NormalMessageResponded` 真正拦住出站回复
+
+### 上一版为什么没兜住
+
+v0.6.0 的拦截打在 `respback` 阶段，只看 `query.resp_message_chain[-1]`。
+一旦本轮有工具调用，`wrapper` 会往 `resp_message_chain` 里追加**多条**链
+（例如 "Calling stay_silent..." 的提示链、最终文案链），
+`[-1]` 未必是最终文案；而工具调用记录在 `resp_messages` 的 assistant 消息上，位置也不固定。
+结果是：工具确实被调用了，但发出去的那条没被判定到。
+
+### 正确的钩子：`NormalMessageResponded`
+
+`pkg/pipeline/wrapper/wrapper.py` 在**构造回复链时**触发这个事件，它把本轮信息都给了插件：
+
+```python
+event = events.NormalMessageResponded(
+    ...,
+    response_text=reply_text,
+    funcs_called=[fc.function.name for fc in result.tool_calls] or [],
+    query=query,
+)
+event_ctx = await self.ap.plugin_connector.emit_event(event, bound_plugins)
+if event_ctx.is_prevented_default():
+    yield entities.StageProcessResult(result_type=entities.ResultType.INTERRUPT, ...)
+```
+
+所以插件里 `event_context.prevent_default()` 会让流水线 **INTERRUPT**，消息根本不发出。
+
+### 现在的判定规则（按顺序）
+
+| 情况 | 处理 |
+|---|---|
+| `funcs_called` 里出现 `silent-tools` 中的工具（默认 `stay_silent,no_reply,silent`） | 整条不发 |
+| 回复文本**只剩**静默标记（默认 `[[SILENT]]` 等） | 整条不发 |
+| 标记混在正文里 | 剥掉标记，发送剩下的正文 |
+| 都没有 | 原样发送 |
+
+工具名允许带归属前缀（`Gareth/GroupSpeakerTag/stay_silent` 也认）。
+
+### 配置项
+
+| 配置项 | 默认 | 说明 |
+|---|---|---|
+| `silent-tools` | `stay_silent,no_reply,silent` | 调用了这些工具就整条不发 |
+| `silent-marks` | `[[SILENT]],[[silent]],[[静默]]` | 纯文字标记兜底；可按需加 `（安静）` 这类舞台提示 |
+
+`!whoami` 会多一行：`模型主动不说话：累计 N 次（最近：调用了工具 / 只剩标记 / 剥掉标记后发送）`。
+
+> v0.6.0 的 `respback` 补丁可以保留当第二道保险（插件没绑定时仍有作用），
+> 但正常路径已经由本事件接管。
+
 ---
 
 ## 三、安装
@@ -435,7 +486,7 @@ resp_messages 里有 stay_silent 的 tool_call   → 整条丢弃
 ### 方式 A（推荐）：网页上传 .lbpkg
 
 1. 面板 `http://127.0.0.1:5300` → **添加扩展**（Add Extension）。
-2. 上传 `GroupSpeakerTag-0.6.0.lbpkg`。
+2. 上传 `GroupSpeakerTag-0.7.0.lbpkg`。
    - 如果你还装着 0.2.x / 0.3.x，**先卸载旧版再装**（手传的包没有"升级"按钮），
      否则可能出现两个版本并存。
 3. 面板 → **插件**，确认已启用。
@@ -490,7 +541,7 @@ resp_messages 里有 stay_silent 的 tool_call   → 整条丢弃
 `!whoami` 输出示例：
 
 ```
-【发言人标记 · 自检 v0.6.0】
+【发言人标记 · 自检 v0.7.0】
 会话：group_123456　← 同群所有人共用这一份上下文
 群名：XX交流群
 本次发言人：张三　ID：10001

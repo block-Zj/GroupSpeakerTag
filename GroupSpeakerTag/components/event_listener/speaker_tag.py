@@ -58,7 +58,7 @@ from langbot_plugin.api.entities import context, events
 from langbot_plugin.api.entities.builtin.platform import message as platform_message
 from langbot_plugin.api.entities.builtin.provider.message import ContentElement, Message
 
-PLUGIN_VERSION = '0.6.0'
+PLUGIN_VERSION = '0.7.0'
 
 DEFAULT_TAG_FORMAT = '【{name}（QQ:{id}）】'
 
@@ -89,6 +89,12 @@ PLACEHOLDER_BLANK = '[空白消息]'
 # 静默开关的默认触发词（都可在插件配置里改，多个用逗号分隔）
 DEFAULT_MUTE_TRIGGERS = '灵灵安静'
 DEFAULT_WAKE_TRIGGERS = '灵灵'
+
+# 模型"选择不说话"的表达方式
+# 1) 调工具（首选）：这些工具名一旦出现在本轮 funcs_called 里，整条回复不发
+DEFAULT_SILENT_TOOLS = 'stay_silent,no_reply,silent'
+# 2) 纯文字标记（兜底）：回复只剩这些标记时不发；混在正文里则剥掉后照发
+DEFAULT_SILENT_MARKS = '[[SILENT]],[[silent]],[[静默]]'
 
 DIAGNOSTIC_COMMANDS = ('whoami', 'speaker', 'prompt')
 
@@ -164,6 +170,8 @@ _STATE: dict[str, typing.Any] = {
     'blank_fixed': 0,
     'blocked': 0,
     'muted_total': 0,
+    'silent_reply': 0,
+    'last_silent_reply': '',
 }
 
 # 静默开关：group_id -> {'muted': bool, 'by': str, 'at': str}
@@ -419,6 +427,80 @@ def _quiet_action(
 
 def _note_blocked() -> None:
     _STATE['blocked'] = int(_STATE.get('blocked') or 0) + 1
+
+
+def _note_silent_reply(kind: str) -> None:
+    _STATE['silent_reply'] = int(_STATE.get('silent_reply') or 0) + 1
+    _STATE['last_silent_reply'] = kind
+
+
+def _silent_tool_called(funcs_called: typing.Any, names: list[str]) -> bool:
+    """本轮是否调用了"保持安静"一类的工具。
+
+    工具名可能被宿主加上归属前缀（例如 `Gareth/GroupSpeakerTag/stay_silent`），
+    所以除了全等，还认 `/`、`__`、`.` 分隔的后缀。
+    """
+
+    wanted = {str(name).strip().lower() for name in names if str(name).strip()}
+    if not wanted:
+        return False
+
+    for name in funcs_called or []:
+        # funcs_called 可能是字符串列表，也可能是带 function.name 的对象
+        if isinstance(name, str):
+            hit = name
+        else:
+            function = getattr(name, 'function', None)
+            hit = getattr(function, 'name', '') if function is not None else ''
+
+        hit_text = str(hit).strip().lower()
+        if not hit_text:
+            continue
+        for wanted_name in wanted:
+            if hit_text == wanted_name:
+                return True
+            for sep in ('/', '__', '.', '::'):
+                if hit_text.endswith(sep + wanted_name):
+                    return True
+    return False
+
+
+def _strip_silent_marks(text: str, marks: list[str]) -> typing.Optional[str]:
+    """剥掉静默标记。
+
+    返回 None 表示"整条什么都不剩"（应丢弃）；返回原文表示没有标记；
+    否则返回剥掉标记后的文本（可能为空串，调用方按需处理）。
+    """
+
+    if not text:
+        return text
+
+    cleaned = text
+    hit = False
+    for mark in marks:
+        if not mark:
+            continue
+        lowered = cleaned.lower()
+        target = mark.lower()
+        if target not in lowered:
+            continue
+        hit = True
+        buffer = []
+        index = 0
+        while True:
+            position = lowered.find(target, index)
+            if position < 0:
+                buffer.append(cleaned[index:])
+                break
+            buffer.append(cleaned[index:position])
+            index = position + len(mark)
+        cleaned = ''.join(buffer)
+        cleaned_stripped = cleaned.strip()
+        cleaned = cleaned_stripped
+
+    if not hit:
+        return text
+    return cleaned if cleaned else None
 
 
 def _image_mode(value: typing.Any) -> str:
@@ -734,6 +816,12 @@ async def _build_identity_report(event_context: context.EventContext, config: di
     else:
         lines.append(f'静默开关：正常（累计进入静默 {_STATE.get("muted_total", 0)} 次）')
     lines.append('静默词：' + ' / '.join(mute_triggers) + '　唤醒词：' + ' / '.join(wake_triggers) + '（@ 也算）')
+
+    if _STATE.get('silent_reply'):
+        reason_map = {'tool': '调用了工具', 'mark': '只剩标记', 'mark-strip': '剥掉标记后发送'}
+        latest = reason_map.get(str(_STATE.get('last_silent_reply') or ''), str(_STATE.get('last_silent_reply') or ''))
+        lines.append(f'模型主动不说话：累计 {_STATE["silent_reply"]} 次（最近：{latest}）')
+
     if _STATE.get('last_image_error'):
         lines.append(f'⚠ 最近一次图片失败：{_STATE["last_image_error"]}')
     if _STATE.get('last_error'):
@@ -908,6 +996,45 @@ class GroupSpeakerTagEventListener(EventListener):
                 _note_tag(tag, f'{name}({sender_id})')
             except Exception as exc:
                 # 插件绝不能阻断主流程：出错就保持原消息不动，但把错误记下来给 !whoami 看
+                _note_error(exc)
+                return
+
+        @self.handler(events.NormalMessageResponded)
+        async def on_normal_message_responded(event_context: context.EventContext) -> None:
+            """回复即将发出前：模型调了"保持安静"工具、或只吐了静默标记 → 整条不发。
+
+            这是唯一能真正拦住**出站**消息的钩子：wrapper 在构造回复链时触发本事件，
+            调 prevent_default() 会让流水线 INTERRUPT，消息根本不会发送。
+            （之前打在 respback 的补丁只能看到 resp_message_chain[-1]，
+              有工具调用时可能不是最终文案，容易漏。）
+            """
+
+            try:
+                config = _plugin_config(self)
+                event = event_context.event
+
+                silent_tools = _split_triggers(config.get('silent-tools'), DEFAULT_SILENT_TOOLS)
+                if _silent_tool_called(getattr(event, 'funcs_called', None), silent_tools):
+                    event_context.prevent_default()
+                    _note_silent_reply('tool')
+                    return
+
+                marks = _split_triggers(config.get('silent-marks'), DEFAULT_SILENT_MARKS)
+                text = str(getattr(event, 'response_text', '') or '')
+                cleaned = _strip_silent_marks(text, marks)
+                if cleaned is None:
+                    # 整条回复只有标记 -> 丢弃
+                    event_context.prevent_default()
+                    _note_silent_reply('mark')
+                    return
+                if cleaned != text:
+                    # 标记混在正文里 -> 换成剥干净的版本再发
+                    event_context.reply_message_chain = platform_message.MessageChain(
+                        [platform_message.Plain(text=cleaned)]
+                    )
+                    _note_silent_reply('mark-strip')
+            except Exception as exc:
+                # 这一层出错会让消息发不出去，绝不能静默失败：记下来给 !whoami 看
                 _note_error(exc)
                 return
 
