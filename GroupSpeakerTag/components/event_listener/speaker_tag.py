@@ -58,7 +58,7 @@ from langbot_plugin.api.entities import context, events
 from langbot_plugin.api.entities.builtin.platform import message as platform_message
 from langbot_plugin.api.entities.builtin.provider.message import ContentElement, Message
 
-PLUGIN_VERSION = '0.5.0'
+PLUGIN_VERSION = '0.6.0'
 
 DEFAULT_TAG_FORMAT = '【{name}（QQ:{id}）】'
 

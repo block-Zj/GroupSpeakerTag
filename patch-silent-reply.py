@@ -1,29 +1,24 @@
 #!/usr/bin/env python
-"""让机器人"想安静的时候真的不说话"：模型只输出 [[SILENT]] 时，不发送这条回复。
+"""让机器人真的"选择不说话"：模型调用 stay_silent 工具（或只输出静默标记）时，不发送这条回复。
 
-为什么不能靠插件
-----------------
-LangBot 的插件事件全是**入站**的（MessageReceived / GroupNormalMessageReceived /
-PromptPreProcessing / CommandSent ...），**没有"发送前"事件**。
-所以"把这条回复吞掉"只能在发送阶段做，也就是 `pkg/pipeline/respback/respback.py`。
+为什么要做两步
+--------------
+1. **给模型一个工具**（插件里的 `components/tool/stay_silent.yaml`）：
+   模型想不说话时应该"调用工具"，而不是吐一段 `[[SILENT]]` 文字占位符——
+   文字对系统没有意义，发到群里就是四个字符。
+2. **在发送阶段拦掉**（本补丁）：LangBot 的插件事件全是入站的，没有"发送前"事件，
+   所以只能在 `pkg/pipeline/respback/respback.py` 里判断并丢弃。
 
-判定规则
+判定顺序
 --------
-1. 取出这条回复里所有 Plain 文本拼起来；
-2. 命中标记（默认 `[[SILENT]]`，可配置）后把标记从文本里剥掉；
-3. 剥完如果**没有任何文字、也没有图片/文件等其它段** → 整条丢弃，不发送；
-   如果剥完还剩下正文（或还有图片）→ 发送清理后的内容。
-
-标记词配置（改完不用重新打补丁，重启生效）
-------------------------------------------
-优先级：
-1. 环境变量 `LANGBOT_SILENT_MARKERS`（逗号分隔）
-2. `./data/silent-reply-markers.txt`（一行一个，# 开头为注释）
-3. 内置默认：[[SILENT]] / [[silent]] / [[Silence]] / 【SILENT】 / [[静默]]
+a. 本轮 `resp_messages` 里出现过 tool_call，名字属于 `stay_silent / silent / no_reply`
+   → 整条丢弃；
+b. 兜底：工具写了静默标记（`%TEMP%/langbot-silent/<query_id>.lock`）→ 消费并丢弃；
+c. 都没有：若回复文本只有 `[[SILENT]]` 这类标记 → 丢弃；若标记混在正文里 → 剥掉标记后发送。
 
 用法
 ----
-    python patch-silent-reply.py
+    python patch-silent-reply.py            # 打补丁 / 从 v1 升级
     python patch-silent-reply.py --dry-run
     python patch-silent-reply.py --revert
 """
@@ -36,7 +31,8 @@ import os
 import py_compile
 import sys
 
-MARKER = '[silent-reply patch]'
+MARKER = '[silent-reply patch v2]'
+MARKER_V1 = '[silent-reply patch]'
 BACKUP_SUFFIX = '.orig-silentreply'
 
 ANCHOR = """        response_index = len(query.resp_message_chain) - 1
@@ -46,24 +42,64 @@ ANCHOR = """        response_index = len(query.resp_message_chain) - 1
 REPLACEMENT = """        response_index = len(query.resp_message_chain) - 1
         message_chain = query.resp_message_chain[-1]
 
-        # [silent-reply patch] 模型只想安静（例如只输出 [[SILENT]]）时不发这条
-        if _apply_silent_reply_filter(message_chain):
-            self.ap.logger.info(
-                'Silent reply suppressed for query %s (marker detected)', query.query_id
-            )
+        # [silent-reply patch v2] 模型调用 stay_silent 工具、或只输出静默标记时，不发这条
+        if _silent_tool_requested(query) or _apply_silent_reply_filter(message_chain):
+            self.ap.logger.info('Silent reply suppressed for query %s', query.query_id)
             return entities.StageProcessResult(
                 result_type=entities.ResultType.CONTINUE, new_query=query
             )
 """
 
+V1_BLOCK = """        # [silent-reply patch] 模型只想安静（例如只输出 [[SILENT]]）时不发这条
+        if _apply_silent_reply_filter(message_chain):
+            self.ap.logger.info(
+                'Silent reply suppressed for query %s (marker detected)', query.query_id
+            )
+"""
+
+V1_BLOCK_REPLACEMENT = """        # [silent-reply patch v2] 模型调用 stay_silent 工具、或只输出静默标记时，不发这条
+        if _silent_tool_requested(query) or _apply_silent_reply_filter(message_chain):
+            self.ap.logger.info('Silent reply suppressed for query %s', query.query_id)
+"""
+
 HELPER = '''
 
 # ---------------------------------------------------------------------------
-# [silent-reply patch] 静默回复过滤
+# [silent-reply patch v2] 静默回复过滤
 # ---------------------------------------------------------------------------
 
+_SILENT_TOOL_NAMES = ('stay_silent', 'silent', 'no_reply')
 _SILENT_DEFAULT_MARKERS = ('[[SILENT]]', '[[silent]]', '[[Silence]]', '【SILENT】', '[[静默]]')
 _SILENT_CACHE = {'mtime': None, 'markers': list(_SILENT_DEFAULT_MARKERS)}
+
+
+def _silent_marker_dir():
+    return os.path.join(tempfile.gettempdir(), 'langbot-silent')
+
+
+def _silent_tool_requested(query) -> bool:
+    """本轮是否调用了"保持安静"工具；顺带消费工具落下的标记。"""
+
+    for message in getattr(query, 'resp_messages', None) or []:
+        for call in getattr(message, 'tool_calls', None) or []:
+            function = getattr(call, 'function', None)
+            name = ''
+            if function is not None:
+                name = getattr(function, 'name', '') or ''
+                if not name and isinstance(function, dict):
+                    name = function.get('name') or ''
+            if str(name).strip().lower() in _SILENT_TOOL_NAMES:
+                return True
+
+    marker = os.path.join(_silent_marker_dir(), f'{getattr(query, "query_id", "")}.lock')
+    if os.path.exists(marker):
+        try:
+            os.remove(marker)
+        except OSError:
+            pass
+        return True
+
+    return False
 
 
 def _silent_marker_list():
@@ -101,7 +137,7 @@ def _silent_marker_list():
     return markers
 
 
-def _apply_silent_reply_filter(chain):
+def _apply_silent_reply_filter(chain) -> bool:
     """命中静默标记就清理文本；整条都空则返回 True（表示丢弃不发送）。"""
 
     root = getattr(chain, 'root', None)
@@ -115,31 +151,24 @@ def _apply_silent_reply_filter(chain):
         return False
 
     joined = ''.join(item.text or '' for item in plain_parts)
-    lowered = joined
-    hit = False
-    for marker in _silent_marker_list():
-        if marker and marker.lower() in lowered.lower():
-            hit = True
-            break
-    if not hit:
+    if not any(marker and marker.lower() in joined.lower() for marker in _silent_marker_list()):
         return False
 
     cleaned = joined
     for marker in _silent_marker_list():
         if not marker:
             continue
-        # 大小写不敏感地剥掉标记
         lowered_marker = marker.lower()
         buffer = []
         index = 0
         text = cleaned
         while True:
-            pos = text.lower().find(lowered_marker, index)
-            if pos < 0:
+            position = text.lower().find(lowered_marker, index)
+            if position < 0:
                 buffer.append(text[index:])
                 break
-            buffer.append(text[index:pos])
-            index = pos + len(marker)
+            buffer.append(text[index:position])
+            index = position + len(marker)
         cleaned = ''.join(buffer)
     cleaned = cleaned.strip()
 
@@ -147,7 +176,6 @@ def _apply_silent_reply_filter(chain):
     if not cleaned and not has_other:
         return True
 
-    # 保留第一段文本放清理后的正文，其余文本段清空
     plain_parts[0].text = cleaned
     for item in plain_parts[1:]:
         item.text = ''
@@ -178,27 +206,45 @@ def candidate_files() -> list[str]:
     return sorted(dict.fromkeys(found))
 
 
+def _ensure_imports(text: str) -> str:
+    if '\nimport os' not in text:
+        text = text.replace('import random\n', 'import os\nimport random\n', 1)
+    if '\nimport tempfile' not in text:
+        text = text.replace('import random\n', 'import random\nimport tempfile\n', 1)
+    return text
+
+
 def apply(path: str, dry_run: bool) -> str:
     with open(path, encoding='utf-8') as handle:
         text = handle.read()
 
-    has_helper = 'def _apply_silent_reply_filter' in text
+    has_tool_helper = 'def _silent_tool_requested' in text
+
     if MARKER in text:
-        if has_helper:
-            return '已打过补丁'
+        if has_tool_helper:
+            return '已打过补丁 v2'
         if dry_run:
-            return '将补函数定义'
-        new_text = text.rstrip('\n') + '\n' + HELPER
-        return _write(path, new_text, text) or '已补函数定义'
+            return '将补齐 v2 函数'
+        new_text = _ensure_imports(text.rstrip('\n') + '\n' + HELPER)
+        return _write(path, new_text, text) or '已补齐 v2 函数'
+
+    # 从 v1 升级
+    if MARKER_V1 in text:
+        new_text = text.replace(V1_BLOCK, V1_BLOCK_REPLACEMENT, 1)
+        if 'def _silent_tool_requested' not in new_text:
+            new_text = new_text.rstrip('\n') + '\n' + HELPER
+        new_text = _ensure_imports(new_text)
+        if dry_run:
+            return '将从 v1 升级到 v2'
+        return _write(path, new_text, text) or '已升级到 v2'
 
     if ANCHOR not in text:
         return '结构不匹配（版本不同？），跳过'
 
     new_text = text.replace(ANCHOR, REPLACEMENT, 1)
-    if not has_helper:
+    if 'def _silent_tool_requested' not in new_text:
         new_text = new_text.rstrip('\n') + '\n' + HELPER
-    if '\nimport os' not in new_text:
-        new_text = new_text.replace('import random\n', 'import os\nimport random\n', 1)
+    new_text = _ensure_imports(new_text)
 
     if dry_run:
         return '将打补丁'
@@ -237,7 +283,7 @@ def revert(path: str) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description='模型输出静默标记时不发送回复')
+    parser = argparse.ArgumentParser(description='模型调用 stay_silent 时不发送回复')
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--revert', action='store_true')
     args = parser.parse_args()
@@ -253,7 +299,7 @@ def main() -> int:
         parts = path.split(os.sep)
         env = parts[parts.index('archive-v0') + 1] if 'archive-v0' in parts else path
         result = revert(path) if args.revert else apply(path, args.dry_run)
-        if result in ('已打补丁', '已补函数定义'):
+        if result in ('已打补丁', '已升级到 v2', '已补齐 v2 函数'):
             touched += 1
         print(f'  {env:22s} {result}')
 
@@ -264,7 +310,6 @@ def main() -> int:
         print('已还原。记得重启 LangBot。')
     else:
         print(f'完成，改动 {touched} 个环境。**重启 LangBot 后生效。**')
-        print('标记词可在 data/silent-reply-markers.txt 配置（一行一个），改完重启即可。')
     return 0
 
 

@@ -1,0 +1,41 @@
+# 本轮不回复（供模型作为工具调用）
+#
+# 为什么要有这个工具：
+#   模型想"不说话"时过去只能输出 [[SILENT]] 这类文字占位符 —— 那只是文本，
+#   对系统没有任何意义，发到群里就是四个字符。给它一个真正的工具，
+#   "不说话"才变成一个**动作**，LangBot 才能在发送前把这条回复吞掉。
+#
+# 工具名（metadata.name）就是模型看到的函数名，改名要同步改
+# patch-silent-reply.py 里的 _SILENT_TOOL_NAMES。
+
+apiVersion: v1
+kind: Tool
+metadata:
+  name: stay_silent
+  label:
+    en_US: Stay Silent
+    zh_Hans: 本轮不回复
+  description:
+    en_US: 'Skip replying to the current message. Use it when a reply would be noise.'
+    zh_Hans: '本轮不回复。当你判断这条消息不需要接话时调用它。'
+spec:
+  parameters:
+    type: object
+    properties:
+      reason:
+        type: string
+        description: 'Why you stay silent (optional, only written to logs)'
+    required: []
+  llm_prompt: |
+    是否接话由你判断。遇到以下情况请调用本工具，而不是输出任何占位符文字：
+    - 消息不是在跟你说话，你插嘴只会打断别人；
+    - 群里只是在闲聊打岔，没有需要你回答的问题；
+    - 你已经答过，再说一遍就是重复。
+
+    调用本工具后，本轮**不要输出任何文字**。系统会据此不发送消息。
+    严禁用 [[SILENT]]、<silent>、[不语] 之类的文字来"表示"安静——那没有用，
+    只有调用本工具才是真的不说话。
+execution:
+  python:
+    path: stay_silent.py
+    attr: StaySilent

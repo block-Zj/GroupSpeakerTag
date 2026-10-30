@@ -4,7 +4,7 @@ metadata:
   author: Gareth
   name: GroupSpeakerTag
   repository: https://github.com/ThDWARF/GroupSpeakerTag
-  version: 0.5.0
+  version: 0.6.0
   description:
     en_US: Prefix group messages with the speaker's name and ID, fetch QQ images locally into base64, and turn QQ faces (emoji) into readable text.
     zh_Hans: 给群消息加上「发言人昵称(ID)」前缀；QQ 图片在本地转 base64；QQ 表情转成可读文本。
@@ -108,6 +108,10 @@ spec:
     EventListener:
       fromDirs:
         - path: components/event_listener/
+          maxDepth: 1
+    Tool:
+      fromDirs:
+        - path: components/tool/
           maxDepth: 1
 execution:
   python:

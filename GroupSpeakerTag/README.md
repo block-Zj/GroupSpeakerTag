@@ -8,7 +8,7 @@
 
 适用：LangBot 4.10.x / 4.11.x（`uvx langbot` 或 Docker）+ NapCat（OneBot v11）接 QQ。
 
-当前版本：**0.5.0**
+当前版本：**0.6.0**
 
 ---
 
@@ -378,6 +378,56 @@ await self._execute_from_stage(0, query)
 - 唤醒只是"解除静默"，是否真的回你，仍由流水线的触发规则（@ / 前缀 / 随机）决定。
 - 静默按**群**生效，不同群互不影响。
 
+## 五·六、让模型自己决定不说话（v0.6.0）
+
+### 问题：`[[SILENT]]` 是一段文字，不是一个动作
+
+模型从别的 AI 那里学来 `[[SILENT]]` 这种写法，以为写上就等于"我不说话"。
+但**文字对系统没有任何意义**——不写补丁的话，群里看到的就是这四个字符；
+写了补丁也只是"事后按字符串匹配"，模型并不知道自己"做对了一件事"。
+
+### 做法：给它一个真正的工具
+
+`components/tool/stay_silent.yaml` 注册了一个工具 `stay_silent`：
+
+| 项 | 内容 |
+|---|---|
+| 工具名 | `stay_silent`（模型看到的函数名） |
+| 参数 | `reason`（可选，仅写入日志） |
+| llm_prompt | 明确告诉模型：**判断不该接话时调用本工具，并严禁用 `[[SILENT]]` 之类文字代替** |
+
+模型调用后，`call()` 会：
+
+1. 返回一句"已记录：本轮不回复，现在不要输出任何文字"；
+2. 在 `%TEMP%/langbot-silent/<query_id>.lock` 落一个标记（兜底用）。
+
+配套补丁 `patch-silent-reply.py`（v2）在发送阶段判断：
+
+```
+resp_messages 里有 stay_silent 的 tool_call   → 整条丢弃
+或 存在本轮静默标记                            → 消费并丢弃
+或 回复文本只剩 [[SILENT]] 这类标记            → 丢弃（老习惯的兼容）
+```
+
+也就是说：**模型调工具 = 真的不说话；顺手写的 `[[SILENT]]` 也仍然兜得住。**
+
+### 为什么插件自己拦不住
+
+插件事件全是入站的（`MessageReceived` / `PromptPreProcessing` …），**没有"发送前"事件**，
+所以"吞掉这条回复"必须由 `respback` 阶段的补丁完成。工具负责"让模型能表达"，
+补丁负责"让表达生效"。
+
+### 验收
+
+1. 装 0.6.0 → 重启 LangBot → 确认 0.5.0 的 `patch-silent-reply.py` 已升级到 v2
+   （`python patch-silent-reply.py` 会显示"已升级到 v2"）；
+2. 群里聊一句它不该接的话；
+3. 日志应出现 `Silent reply suppressed for query N`，群里没有任何消息。
+
+> 如果模型仍然只写 `[[SILENT]]` 而不调工具，说明它还没学会新习惯。
+> 可以在系统提示词里加一句："如果要保持安静，调用 stay_silent 工具。"
+> 字符串兜底会保证此时也不会把 `[[SILENT]]` 发出去。
+
 ---
 
 ## 三、安装
@@ -385,7 +435,7 @@ await self._execute_from_stage(0, query)
 ### 方式 A（推荐）：网页上传 .lbpkg
 
 1. 面板 `http://127.0.0.1:5300` → **添加扩展**（Add Extension）。
-2. 上传 `GroupSpeakerTag-0.5.0.lbpkg`。
+2. 上传 `GroupSpeakerTag-0.6.0.lbpkg`。
    - 如果你还装着 0.2.x / 0.3.x，**先卸载旧版再装**（手传的包没有"升级"按钮），
      否则可能出现两个版本并存。
 3. 面板 → **插件**，确认已启用。
@@ -440,7 +490,7 @@ await self._execute_from_stage(0, query)
 `!whoami` 输出示例：
 
 ```
-【发言人标记 · 自检 v0.5.0】
+【发言人标记 · 自检 v0.6.0】
 会话：group_123456　← 同群所有人共用这一份上下文
 群名：XX交流群
 本次发言人：张三　ID：10001
