@@ -8,7 +8,7 @@
 
 适用：LangBot 4.10.x / 4.11.x（`uvx langbot` 或 Docker）+ NapCat（OneBot v11）接 QQ。
 
-当前版本：**0.7.0**
+当前版本：**0.8.0**
 
 ---
 
@@ -479,6 +479,54 @@ if event_ctx.is_prevented_default():
 > v0.6.0 的 `respback` 补丁可以保留当第二道保险（插件没绑定时仍有作用），
 > 但正常路径已经由本事件接管。
 
+## 五·八、v0.8.0：用"标记文件"取代一切文本猜测
+
+### 为什么又改
+
+v0.7.0 靠 `NormalMessageResponded.funcs_called` 判断，实测**该字段是空的**——
+wrapper 取的是"最后一条消息"的 `tool_calls`，而工具调用发生在更早一轮。
+于是模型调了 `stay_silent`，最终还是把「（未回复）」发到群里。
+
+v3 的"括号形状判定"被放弃：它仍是在猜模型的措辞，换个写法就漏，属于无底洞。
+
+### 现在的机制
+
+```
+工具被调用 → 写标记文件  <LangBot目录>/data/silent/<会话>-<毫秒>.marker
+发送前      → 扫该目录，30 秒内有新标记 → 这条不发，标记删掉
+```
+
+特点：
+
+- **不依赖 query_id**（可能是 None）
+- **不依赖进程 TEMP**（插件和主进程可能不同）
+- **不依赖模型输出什么字**——写「（未回复）」「（躺平）」「……」都一样
+- 一次调用只影响一条回复（多目录副本会一并清理）
+
+### 配置
+
+| 配置项 | 默认 | 说明 |
+|---|---|---|
+| `silent-marker-dir` | `D:/Desktop/Ling/langbot/data/silent` | 标记目录，必须与补丁默认值一致 |
+| `silent-tools` | `stay_silent,no_reply,silent` | 备用通道：resp_messages 能扫到 tool_call 时也拦 |
+| `silent-marks` | `[[SILENT]],...` | 文本兜底，保留但不扩展 |
+
+### 诊断
+
+插件每次调用都会往 `<标记目录>/_tool.log` 追加一行：
+
+```
+[10-30 17:19:32] session=group_1130885043 query_id=12345 reason=群里闲聊 written=2 errors=- paths=[...]
+```
+
+LangBot 侧命中时日志是：
+
+```
+Silent reply suppressed for query 123 (marker=D:\...\group_1130885043-1793351972647.marker)
+```
+
+两边都对上 → 链路通；只有一边 → 一眼看出断在哪。
+
 ---
 
 ## 三、安装
@@ -486,7 +534,7 @@ if event_ctx.is_prevented_default():
 ### 方式 A（推荐）：网页上传 .lbpkg
 
 1. 面板 `http://127.0.0.1:5300` → **添加扩展**（Add Extension）。
-2. 上传 `GroupSpeakerTag-0.7.0.lbpkg`。
+2. 上传 `GroupSpeakerTag-0.8.0.lbpkg`。
    - 如果你还装着 0.2.x / 0.3.x，**先卸载旧版再装**（手传的包没有"升级"按钮），
      否则可能出现两个版本并存。
 3. 面板 → **插件**，确认已启用。
@@ -541,7 +589,7 @@ if event_ctx.is_prevented_default():
 `!whoami` 输出示例：
 
 ```
-【发言人标记 · 自检 v0.7.0】
+【发言人标记 · 自检 v0.8.0】
 会话：group_123456　← 同群所有人共用这一份上下文
 群名：XX交流群
 本次发言人：张三　ID：10001

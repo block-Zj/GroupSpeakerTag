@@ -4,7 +4,7 @@ metadata:
   author: Gareth
   name: GroupSpeakerTag
   repository: https://github.com/ThDWARF/GroupSpeakerTag
-  version: 0.7.0
+  version: 0.8.0
   description:
     en_US: Prefix group messages with the speaker's name and ID, fetch QQ images locally into base64, and turn QQ faces (emoji) into readable text.
     zh_Hans: 给群消息加上「发言人昵称(ID)」前缀；QQ 图片在本地转 base64；QQ 表情转成可读文本。
@@ -123,6 +123,16 @@ spec:
         zh_Hans: "兜底：回复只剩这些标记时不发送；混在正文里则剥掉标记后照发。多个用逗号分隔。"
       type: string
       default: "[[SILENT]],[[silent]],[[静默]]"
+      required: false
+    - name: silent-marker-dir
+      label:
+        en_US: Silent Marker Directory
+        zh_Hans: 静默标记目录
+      description:
+        en_US: "Absolute directory where the stay_silent tool drops marker files; LangBot checks it before sending. Must match the patch's default (LangBot data/silent)."
+        zh_Hans: "stay_silent 工具落标记文件的绝对目录，LangBot 发送前会扫它。必须和补丁的默认值一致：<LangBot目录>/data/silent"
+      type: string
+      default: 'D:/Desktop/Ling/langbot/data/silent'
       required: false
   components:
     EventListener:

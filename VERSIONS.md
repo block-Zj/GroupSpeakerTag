@@ -6,7 +6,8 @@
 
 | 版本 | 日期 | 包大小 | 直接下载 | SHA256（前 16 位） |
 |---|---|---|---|---|
-| **v0.7.0**（最新） | 2026-10-30 | 30.4 KB | [下载](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.7.0/GroupSpeakerTag-0.7.0.lbpkg) | `efea9f1f4a54bee2` |
+| **v0.8.0**（最新） | 2026-10-30 | 32.3 KB | [下载](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.8.0/GroupSpeakerTag-0.8.0.lbpkg) | `b469655d90a86393` |
+| v0.7.0 | 2026-10-30 | 30.4 KB | [下载](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.7.0/GroupSpeakerTag-0.7.0.lbpkg) | `efea9f1f4a54bee2` |
 | v0.6.0 | 2026-10-30 | 27.6 KB | [下载](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.6.0/GroupSpeakerTag-0.6.0.lbpkg) | `443b3f5d3989af2c` |
 | v0.5.0 | 2026-10-22 | 25.1 KB | [下载](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.5.0/GroupSpeakerTag-0.5.0.lbpkg) | `35953eec624281e5` |
 | v0.4.4 | 2026-10-21 | 21.8 KB | [下载](https://github.com/block-Zj/GroupSpeakerTag/blob/v0.4.4/GroupSpeakerTag-0.4.4.lbpkg) | `644adee1ca331ba0` |
@@ -24,7 +25,8 @@
 
 | 版本 | 主要变更 |
 |---|---|
-| **v0.7.0** | 改用 `NormalMessageResponded` 事件拦截出站回复：模型调用 `stay_silent` 或只输出静默标记时整条不发。修 0.6.0 在 respback 层漏判的问题。 |
+| **v0.8.0** | 静默改由**标记文件**驱动（工具落盘 → 发送前扫目录），不再依赖 funcs_called 或文本猜测 |
+| v0.7.0 | 改用 `NormalMessageResponded` 事件拦截出站回复：模型调用 `stay_silent` 或只输出静默标记时整条不发。修 0.6.0 在 respback 层漏判的问题。 |
 | v0.6.0 | 新增 `stay_silent` 工具：模型用**工具调用**表达「不回复」，而不是写 `[[SILENT]]` 文字。配套补丁在发送阶段拦截。 |
 | v0.5.0 | 静默开关：群里出现「灵灵安静」即拦截全部消息、不再回复；发「灵灵」或 @她 恢复。触发词可配置。 |
 | v0.4.4 | 更正文档：说明插件内的「请求前消毒」对 LocalAgent 无效（runner 直读 Transcript），真正的防线改为配套补丁 `patch-history-sanitize.py`。代码行为与 0.4.3 一致。 |
